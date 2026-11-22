@@ -1,0 +1,45 @@
+# ============================================================
+# application-test.yml
+# Used by: @ActiveProfiles("test") in unit/integration tests
+# Uses H2 in-memory DB so tests don't need a real Postgres.
+# ============================================================
+
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+
+  # Disable Flyway in tests — Hibernate creates the schema
+  flyway:
+    enabled: false
+
+  ai:
+    google:
+      genai:
+        api-key: test-key-not-real
+        embedding:
+          api-key: test-key-not-real
+
+app:
+  cors:
+    allowed-origins: http://localhost:5173
+  jwt:
+    secret: test-secret-key-that-is-at-least-64-chars-long-for-HS512-algorithm-testing
+    expiry-ms: 3600000
+    refresh-expiry-ms: 604800000
+  supabase:
+    url: http://localhost:54321
+    service-role-key: test-key
+    storage-bucket: brochures
+  ingestion:
+    chunk-size: 512
+    chunk-overlap: 64
+    max-file-size-mb: 20
+    embedding-dimension: 3072

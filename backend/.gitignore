@@ -1,0 +1,35 @@
+# ============================================================
+# .gitignore — Backend (Java / Maven)
+# ============================================================
+
+# Secrets — NEVER commit
+.env
+*.env.local
+
+# Maven build output
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# IDE files
+.idea/
+*.iml
+*.iws
+*.ipr
+.classpath
+.project
+.settings/
+.vscode/
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Uploaded files (if any local temp storage)
+uploads/
