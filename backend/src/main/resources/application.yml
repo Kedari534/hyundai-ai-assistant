@@ -59,7 +59,7 @@ spring:
             # gemini-2.0-flash was shut down on 1 June 2026.
             model: ${SPRING_AI_GOOGLE_GENAI_CHAT_MODEL:gemini-3.5-flash-lite}
             temperature: 0.1            # Low temperature = factual, grounded responses
-            max-tokens: 2048
+            max-tokens: 4096
         embedding:
           api-key: ${GOOGLE_AI_API_KEY:}
           options:
