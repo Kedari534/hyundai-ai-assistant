@@ -1,5 +1,6 @@
 package com.cyepro.hyundai.config;
 
+import com.cyepro.hyundai.auth.filter.JwtAuthenticationFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -14,6 +15,7 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfigurationSource;
 
 /**
@@ -26,7 +28,9 @@ import org.springframework.web.cors.CorsConfigurationSource;
  * - Public endpoints: /api/health, /api/auth/** (login/register).
  * - Everything else requires a valid JWT Bearer token.
  *
- * The JWT filter (Phase 3) will be added here.
+ * The JwtAuthenticationFilter runs BEFORE Spring's UsernamePasswordAuthenticationFilter.
+ * It populates the SecurityContext with the authenticated user, so downstream
+ * filters and controllers can access the current user via @AuthenticationPrincipal.
  */
 @Configuration
 @EnableWebSecurity
@@ -34,11 +38,14 @@ public class SecurityConfig {
 
     private final CorsConfigurationSource corsConfigurationSource;
     private final UserDetailsService userDetailsService;
+    private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
     public SecurityConfig(CorsConfigurationSource corsConfigurationSource,
-                          UserDetailsService userDetailsService) {
+                          UserDetailsService userDetailsService,
+                          JwtAuthenticationFilter jwtAuthenticationFilter) {
         this.corsConfigurationSource = corsConfigurationSource;
         this.userDetailsService = userDetailsService;
+        this.jwtAuthenticationFilter = jwtAuthenticationFilter;
     }
 
     @Bean
@@ -49,19 +56,20 @@ public class SecurityConfig {
             // Disable CSRF — not needed for stateless JWT REST APIs
             .csrf(AbstractHttpConfigurer::disable)
             // No server-side sessions — every request must carry a JWT
+            .securityContext(context -> context.requireExplicitSave(false))
             .sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             // Authorization rules
             .authorizeHttpRequests(auth -> auth
-                // Public endpoints
+                // Public endpoints — no token needed
                 .requestMatchers("/api/health", "/actuator/health").permitAll()
                 .requestMatchers("/api/auth/**").permitAll()
                 // Everything else requires authentication
                 .anyRequest().authenticated()
             )
-            .authenticationProvider(authenticationProvider());
-
-        // Phase 3 will add: .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+            .authenticationProvider(authenticationProvider())
+            // JWT filter runs before Spring tries form-login auth
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

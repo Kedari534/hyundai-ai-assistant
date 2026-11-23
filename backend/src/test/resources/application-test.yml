@@ -39,7 +39,13 @@ app:
     service-role-key: test-key
     storage-bucket: brochures
   ingestion:
-    chunk-size: 512
-    chunk-overlap: 64
+    chunk-size: 1600
+    chunk-overlap: 200
     max-file-size-mb: 20
-    embedding-dimension: 3072
+    embedding-dimension: 1536
+  storage:
+    mode: local
+    local-dir: target/test-uploads
+  rag:
+    top-k: 4
+    min-similarity: 0.35

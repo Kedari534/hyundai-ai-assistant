@@ -1,0 +1,14 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: hyundai
+      POSTGRES_PASSWORD: hyundai
+      POSTGRES_DB: hyundai
+    ports:
+      - "5432:5432"
+    volumes:
+      - hyundai_pg:/var/lib/postgresql/data
+
+volumes:
+  hyundai_pg:

@@ -12,9 +12,12 @@
 --   handles incremental inserts without rebuild. IVFFlat needs
 --   full index rebuild when new vectors arrive.
 --
--- CRITICAL: vector(3072) MUST match gemini-embedding-001 output.
---   If this mismatches, every INSERT will fail at runtime.
---   Lock dimension here AND in application.yml simultaneously.
+-- CRITICAL: vector(1536) is the width we store.
+--   gemini-embedding-001 can emit 3072, but pgvector refuses an HNSW
+--   index on the vector type above 2000 dimensions.
+--   We ask for 1536 (or keep the first 1536 values) and L2-normalize
+--   in Java. 3072 is already normalized; a shortened vector is not.
+--   Lock this width in EmbeddingDimensions.WIDTH as well.
 -- ============================================================
 
 CREATE EXTENSION IF NOT EXISTS vector;   -- enable pgvector
@@ -27,8 +30,8 @@ CREATE TABLE document_chunks (
     page_number   INTEGER  NOT NULL,
     chunk_index   INTEGER  NOT NULL,
     content       TEXT     NOT NULL,
-    -- gemini-embedding-001 default output: 3072 dimensions
-    embedding     vector(3072),
+    -- gemini-embedding-001, shortened to 1536 so HNSW can index it
+    embedding     vector(1536),
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -46,5 +49,5 @@ CREATE INDEX idx_chunks_embedding_hnsw ON document_chunks
     WITH (m = 16, ef_construction = 64);
 
 COMMENT ON TABLE  document_chunks                IS 'Text chunks from PDF brochures with vector embeddings';
-COMMENT ON COLUMN document_chunks.embedding      IS 'gemini-embedding-001 vector, dim=3072, cosine similarity';
+COMMENT ON COLUMN document_chunks.embedding      IS 'gemini-embedding-001 vector, dim=1536, L2-normalized, cosine similarity';
 COMMENT ON COLUMN document_chunks.chunk_index    IS 'Position of this chunk within the document (0-based)';

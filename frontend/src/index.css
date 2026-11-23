@@ -1,19 +1,187 @@
 @import "tailwindcss";
 
-:root {
-  --color-navy: #101B2D;
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Plus Jakarta Sans", Inter, sans-serif;
+  --color-navy: #101b2d;
+  --color-navy-dark: #0b1320;
   --color-graphite: #263445;
-  --color-accent: #0066CC;
-  --color-surface: #FFFFFF;
-  --color-background: #F5F7FA;
-  --color-muted: #64748B;
-  --color-border: #E2E8F0;
+  --color-accent: #0066cc;
+  --color-accent-hover: #0057ad;
+  --color-accent-pressed: #004a94;
+  --color-accent-tint: #e6f0fa;
+  --color-canvas: #f5f7fa;
+  --color-surface: #ffffff;
+  --color-ink: #172033;
+  --color-muted: #64748b;
+  --color-line: #e2e8f0;
+  --color-success: #16a34a;
+  --color-success-tint: #dcfce7;
+  --color-warning: #d97706;
+  --color-warning-tint: #fef3c7;
+  --color-danger: #dc2626;
+  --color-danger-tint: #fee2e2;
+  --shadow-soft: 0 1px 2px rgb(16 27 45 / 0.05);
+  --shadow-raised: 0 8px 24px rgb(16 27 45 / 0.06);
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-modal: 16px;
+}
+
+html, body, #root {
+  height: 100%;
 }
 
 body {
   margin: 0;
-  background-color: #F5F7FA;
-  color: #172033;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, .font-heading {
+  font-family: var(--font-heading);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+button, a, input, textarea, select {
+  font: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.skip-link {
+  position: absolute;
+  left: 16px;
+  top: -40px;
+  z-index: 50;
+  background: white;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+.skip-link:focus {
+  top: 12px;
+}
+
+.brand-panel {
+  background-color: var(--color-navy);
+  background-image:
+    linear-gradient(rgb(255 255 255 / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.04) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+.answer {
+  max-width: 68ch;
+}
+
+.answer h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.answer p {
+  margin: 0 0 12px;
+}
+
+.answer table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+}
+
+.answer th,
+.answer td {
+  border-bottom: 1px solid var(--color-line);
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.answer th {
+  background: var(--color-navy);
+  color: white;
+  font-weight: 500;
+}
+
+.answer tr:nth-child(even) td {
+  background: #f8fafc;
+}
+
+.answer td:first-child,
+.answer th:first-child {
+  position: sticky;
+  left: 0;
+}
+
+.answer th:first-child {
+  border-top-left-radius: 8px;
+}
+
+.answer th:last-child {
+  border-top-right-radius: 8px;
+}
+
+.missing {
+  color: var(--color-muted);
+  font-style: italic;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+}
+
+.shimmer {
+  background: linear-gradient(90deg, #e2e8f0 25%, #f8fafc 37%, #e2e8f0 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.4s ease infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: 0 0; }
+}
+
+.pulse-dot {
+  animation: pulse 1.4s ease infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.caret::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  margin-left: 2px;
+  background: var(--color-accent);
+  vertical-align: text-bottom;
+  animation: pulse 1s steps(1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .caret::after { animation: none; }
 }

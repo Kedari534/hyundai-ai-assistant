@@ -6,7 +6,9 @@
 
 ## Context
 
-We need an approximate nearest-neighbor (ANN) index on the `document_chunks.embedding` column (`vector(3072)`). pgvector supports two options: HNSW and IVFFlat.
+We need an approximate nearest-neighbor (ANN) index on the `document_chunks.embedding` column (`vector(1536)`). pgvector supports two options: HNSW and IVFFlat.
+
+`gemini-embedding-001` defaults to 3072 dimensions. pgvector 0.7+ still refuses an HNSW or IVFFlat index on the `vector` type above 2000 dimensions (Supabase documents this). A `halfvec` expression index can cover 3072, but every query must repeat the cast. We store a 1536-dimension prefix, which Google lists as a recommended size, and L2-normalize it in application code because this model only pre-normalizes the full 3072 vector.
 
 ## Decision
 

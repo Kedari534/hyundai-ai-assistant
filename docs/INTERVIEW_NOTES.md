@@ -42,6 +42,20 @@
 
 ---
 
+### Correction after re-reading the repo and current docs (23 Nov 2026)
+
+The earlier Phase 1 note treats `vector(3072)` plus an HNSW index as the safe choice. That migration will fail on Supabase.
+
+pgvector can **store** a 3072-dimension `vector`, but an HNSW or IVFFlat index on the `vector` type allows at most **2,000 dimensions** (pgvector 0.7+; still true in the 0.8 line). Supabase documents the same limit. `V3__create_document_chunks_pgvector.sql` creates `USING hnsw (embedding vector_cosine_ops)` on `vector(3072)`. Flyway will stop with an error like "column cannot have more than 2000 dimensions for hnsw index".
+
+`gemini-embedding-001` still defaults to 3072 and can be shortened to 768, 1536, or 3072. Google says the full 3072 vector is already normalized. A shortened vector from this model is **not** normalized, so we must L2-normalize it ourselves before cosine search. `gemini-embedding-2` auto-normalizes shortened vectors, but its embedding space is incompatible with `gemini-embedding-001`, so we do not mix them.
+
+Recommended lock, pending approval: `gemini-embedding-001`, output size **1536**, column `vector(1536)`, HNSW with `vector_cosine_ops`, normalize every vector in Java before insert and before query.
+
+`gemini-2.0-flash` was shut down on 1 June 2026. The value in `application.yml` will not answer chat requests. Replacement candidates to confirm in Phase 2: `gemini-3.5-flash-lite` (cheaper, better free-tier fit) or `gemini-3.6-flash` (stronger tables). Do not enable Google Search grounding; that would answer from the web instead of the brochures.
+
+---
+
 *More questions will be added after each phase.*
 
 
@@ -82,3 +96,67 @@
 > "Free-tier hosting providers (like Render or Koyeb) spin down inactive applications after 15 to 60 minutes of inactivity. When a user finally visits, they experience a 30-to-50-second cold start while the JVM initializes. Having a lightweight `/api/health` endpoint serves two functions: first, an external free uptime monitor (like Cron-job.org or UptimeRobot) can ping it every 10–14 minutes to keep the backend warm; second, the endpoint performs a quick `SELECT 1` query to verify that the PostgreSQL database connection pool is healthy, returning HTTP 200 when alive or HTTP 503 when degraded."
 
 ---
+
+## Phases 5–8 — Documents, ingestion, retrieval, chat
+
+### What you should be able to explain
+
+- Upload returns 202 because indexing calls Gemini once per chunk and must not hold the HTTP thread.
+- A comparison searches each vehicle separately, then the model writes one table from both result sets.
+- If no chunk passes the similarity threshold, we do not call Gemini. The fixed sentence is the whole answer.
+- Page numbers come from reading the PDF one page at a time, not from guessing after a single full-text extract.
+
+### Question 1: Why is the vector 1536 if the model can emit 3072?
+
+> "pgvector will store 3072 numbers, but it refuses to build the HNSW index we need once the width passes 2000. Google’s embedding model is Matryoshka-trained, so the first 1536 numbers are a supported size. We L2-normalize that shorter vector ourselves, because only the full 3072 vector arrives already normalized. Cosine search is a direction comparison, so an unnormalized vector would rank by magnitude as well as meaning."
+
+### Question 2: Why not one similarity search for “Alcazar vs Creta”?
+
+> "One search returns the nearest chunks in the whole library. The longer brochure, or the one whose wording is closer to the question, fills the top results and the other car disappears. I detect both names and run the same question vector twice, once with a vehicle filter. The prompt then sees two labeled piles and has to say when a cell is missing."
+
+### Question 3: What happens if the brochure is a scan?
+
+> "PDFBox reads characters, not pictures. If the file has almost no letters, ingestion marks it FAILED with a message that it looks image-only. We do not OCR in this version, and we do not pretend the empty text is a brochure the model can answer from."
+
+---
+
+## Phase 3 — JWT Authentication (register, login, token refresh, protected routes)
+
+### Topics You Should Be Able to Explain
+
+- What JWT is, what it contains, and why it's stateless
+- Why we use BCrypt and what the "strength" number means
+- How Spring Security's filter chain works and where JWT fits
+- Why we use `AuthenticationManager` for login (not check password directly)
+- Why `OncePerRequestFilter` exists and what it does
+- The difference between an access token and a refresh token
+- Why controllers are "thin" and business logic lives in services
+- How `@Valid` and Bean Validation work (and what happens on failure)
+- Why we return generic error messages for bad credentials
+
+---
+
+### Question 1: What is a JWT and why is it stateless?
+
+**Natural answer:**
+
+> "JWT stands for JSON Web Token. It has three Base64-encoded parts separated by dots: a header (algorithm used), a payload (claims like user ID, email, role, expiry), and a signature. The server signs it with a secret key using HMAC-SHA256. On every request, the client sends this token in the `Authorization: Bearer <token>` header. The server just verifies the signature — if it's valid and not expired, the user is authenticated. No session stored anywhere. That's what stateless means: the server can verify who you are without checking a database or a session store. This is why JWT scales well — any instance of the server can verify the token independently."
+
+---
+
+### Question 2: Why BCrypt? What does the strength (cost factor) number mean?
+
+**Natural answer:**
+
+> "BCrypt is a password hashing algorithm specifically designed to be slow. That's the point — it makes brute-force attacks expensive. The strength number (we use 12) is a cost factor. Internally BCrypt runs 2^12 = 4,096 rounds of key derivation. On a modern CPU, BCrypt with strength 12 takes about 250–300ms per hash. If an attacker steals your database, cracking one password takes 250ms instead of microseconds. At scale, cracking a million passwords would take years, not minutes. We don't use MD5 or SHA-256 for passwords because those are designed to be fast — that's the opposite of what you want."
+
+---
+
+### Question 3: Walk me through what happens when a user logs in with wrong credentials.
+
+**Natural answer:**
+
+> "The login request hits `POST /api/auth/login`. Spring's `@Valid` runs Bean Validation first — if the email format is wrong or password is blank, it returns 422 before we even touch the database. If validation passes, `AuthService.login()` calls `AuthenticationManager.authenticate()`. This goes through Spring Security's `DaoAuthenticationProvider`, which loads the user from the database by email, then calls `BCryptPasswordEncoder.matches(rawPassword, storedHash)`. If it doesn't match, Spring throws `BadCredentialsException`. We catch that and throw our own `BusinessException` with the message 'Invalid email or password.' — deliberately vague. The `GlobalExceptionHandler` converts that to a 401 JSON response. We never say 'email not found' or 'wrong password' separately — that would tell an attacker which one was correct."
+
+---
+

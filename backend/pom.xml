@@ -188,6 +188,20 @@
                     <jvmArguments>-Xmx400m -Xms128m -XX:+UseSerialGC</jvmArguments>
                 </configuration>
             </plugin>
+            <!--
+                Surefire: add -XX:+EnableDynamicAgentLoading so Mockito's byte-buddy
+                agent loads cleanly on Java 21+. Without it the attach operation errors
+                in the forked JVM and corrupts the surefire output stream.
+                Using subclass mock-maker (via mockito-extensions/) avoids agent
+                attachment entirely — no inline mocking needed for our tests.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>-XX:+EnableDynamicAgentLoading -Xshare:off</argLine>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>

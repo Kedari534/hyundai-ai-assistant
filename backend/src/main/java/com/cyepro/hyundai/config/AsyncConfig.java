@@ -1,6 +1,5 @@
 package com.cyepro.hyundai.config;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.AsyncConfigurer;
@@ -22,9 +21,6 @@ import java.util.concurrent.Executor;
 @Configuration
 public class AsyncConfig implements AsyncConfigurer {
 
-    @Value("${app.ingestion.chunk-size:512}")
-    private int chunkSize;
-
     @Bean(name = "ingestionExecutor")
     public Executor ingestionExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
@@ -34,6 +30,17 @@ public class AsyncConfig implements AsyncConfigurer {
         executor.setThreadNamePrefix("ingestion-");
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(60);  // graceful shutdown
+        executor.initialize();
+        return executor;
+    }
+
+    @Bean(name = "chatExecutor")
+    public Executor chatExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(20);
+        executor.setThreadNamePrefix("chat-");
         executor.initialize();
         return executor;
     }

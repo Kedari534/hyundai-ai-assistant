@@ -52,17 +52,19 @@ spring:
   ai:
     google:
       genai:
-        api-key: ${GOOGLE_AI_API_KEY}
+        api-key: ${GOOGLE_AI_API_KEY:}
         chat:
           options:
-            model: ${SPRING_AI_GOOGLE_GENAI_CHAT_MODEL:gemini-2.0-flash}
+            # gemini-2.0-flash was shut down on 1 June 2026.
+            model: ${SPRING_AI_GOOGLE_GENAI_CHAT_MODEL:gemini-3.5-flash-lite}
             temperature: 0.1            # Low temperature = factual, grounded responses
             max-tokens: 2048
         embedding:
-          api-key: ${GOOGLE_AI_API_KEY}
+          api-key: ${GOOGLE_AI_API_KEY:}
           options:
             model: ${SPRING_AI_GOOGLE_GENAI_EMBEDDING_MODEL:gemini-embedding-001}
-            dimensions: ${SPRING_AI_GOOGLE_GENAI_EMBEDDING_DIMENSIONS:3072}
+            # 1536 fits pgvector's 2000-dimension HNSW limit. See V3.
+            dimensions: ${SPRING_AI_GOOGLE_GENAI_EMBEDDING_DIMENSIONS:1536}
 
 # ── Server ────────────────────────────────────────────────────
 server:
@@ -102,16 +104,23 @@ app:
     secret: ${JWT_SECRET}
     expiry-ms: ${JWT_EXPIRY_MS:3600000}
     refresh-expiry-ms: ${JWT_REFRESH_EXPIRY_MS:604800000}
+  storage:
+    # local for development. Set supabase before any host with an ephemeral disk.
+    mode: ${APP_STORAGE_MODE:local}
+    local-dir: ${APP_STORAGE_LOCAL_DIR:uploads}
   supabase:
-    url: ${SUPABASE_URL}
-    service-role-key: ${SUPABASE_SERVICE_ROLE_KEY}
+    url: ${SUPABASE_URL:}
+    service-role-key: ${SUPABASE_SERVICE_ROLE_KEY:}
     storage-bucket: ${SUPABASE_STORAGE_BUCKET:brochures}
   ingestion:
-    chunk-size: ${INGESTION_CHUNK_SIZE:512}
-    chunk-overlap: ${INGESTION_CHUNK_OVERLAP:64}
+    # Characters, not tokens. Large enough to keep a spec block together.
+    chunk-size: ${INGESTION_CHUNK_SIZE:1600}
+    chunk-overlap: ${INGESTION_CHUNK_OVERLAP:200}
     max-file-size-mb: ${INGESTION_MAX_FILE_SIZE_MB:20}
-    # CRITICAL: must match gemini-embedding-001 output dimension
-    embedding-dimension: ${SPRING_AI_GOOGLE_GENAI_EMBEDDING_DIMENSIONS:3072}
+    embedding-dimension: ${SPRING_AI_GOOGLE_GENAI_EMBEDDING_DIMENSIONS:1536}
+  rag:
+    top-k: ${RAG_TOP_K:6}
+    min-similarity: ${RAG_MIN_SIMILARITY:0.35}
 
 # ── Logging ───────────────────────────────────────────────────
 logging:
