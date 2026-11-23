@@ -15,9 +15,9 @@ services:
     healthCheckPath: /actuator/health
     envVars:
       - key: DB_URL
-        sync: false     # Set in Render dashboard - never commit secrets
+        value: "jdbc:postgresql://aws-1-ap-southeast-2.pooler.supabase.com:5432/postgres?sslmode=require"
       - key: DB_USERNAME
-        sync: false
+        value: "postgres.porcqpphgaxponrmwkgk"
       - key: DB_PASSWORD
         sync: false
       - key: GOOGLE_AI_API_KEY
