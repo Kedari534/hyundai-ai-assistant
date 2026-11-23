@@ -11,8 +11,8 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          markdown: ['react-markdown', 'remark-gfm'],
+        manualChunks(id) {
+          if (id.includes('react-markdown') || id.includes('remark-gfm')) return 'markdown'
         },
       },
     },
