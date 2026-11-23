@@ -1,201 +1,315 @@
-# Interview Notes — Hyundai AI Assistant Project
+# Interview Notes — Hyundai AI Assistant
 
-> Updated after each phase. These are natural, conversational answers — not textbook definitions.
-
----
-
-## Phase 1 — Architecture & Planning
-
-### Topics You Should Be Able to Explain
-
-- What RAG is and why we use it instead of a bare LLM
-- The role of embeddings and vector databases in RAG
-- Why HNSW was chosen over IVFFlat
-- Why embedding dimension is critical (and what breaks if it mismatches)
-- Why ingestion is asynchronous
-- What Flyway does and why we use it
-- What JWT is and why it's stateless
+Technical Q&A covering architecture decisions, trade-offs, and "why" explanations.
+Useful for walkthrough conversations, code reviews, and understanding the project deeply.
 
 ---
 
-### Question 1: Why HNSW over IVFFlat?
+## Phase 1 — Architecture & Tech Stack
 
-**Natural answer:**
+**Q1: Why Spring AI instead of LangChain4j or calling the Gemini API directly?**
 
-> "HNSW and IVFFlat are both ways to do fast approximate nearest-neighbor search in pgvector. I chose HNSW because our app continuously ingests new brochures — that means new vectors being added all the time. HNSW is a graph-based index that handles new inserts gracefully without needing a rebuild. IVFFlat splits vectors into k-means clusters at build time, and when new vectors arrive, those cluster boundaries go stale — you get silent accuracy drops until you drop and recreate the index. For our scale of maybe 50 brochures, HNSW's slightly higher memory use is totally fine, and we avoid the operational complexity of periodic index rebuilds."
+Spring AI integrates naturally into the Spring ecosystem (Spring Boot auto-configuration, `@Service`, `@Autowired`).
+It provides a vendor-neutral `ChatModel` and `EmbeddingModel` interface — if we ever switch from Gemini to OpenAI,
+we change only one config property, not the application logic.
+Calling the API directly would require writing our own HTTP client, error handling, retries, and streaming logic.
+Spring AI gives all of that for free.
 
----
+**Q2: Why pgvector with HNSW index instead of a dedicated vector DB like Pinecone or Weaviate?**
 
-### Question 2: How does RAG work? Why not just send the question to Gemini?
+We already need PostgreSQL for user data and documents. Adding a second database (Pinecone) means:
+- Two separate services to manage, pay for, and monitor
+- Cross-service joins are impossible (can't JOIN pgvector results with user rows in Pinecone)
+- More operational complexity
 
-**Natural answer:**
+pgvector with HNSW gives ~90% of Pinecone's performance for our scale (thousands of chunks, not billions).
+Free-tier Supabase includes both — perfect for a dealership product.
 
-> "RAG stands for Retrieval-Augmented Generation. If you just ask Gemini 'What is the Alcazar's boot space?', it'll answer from its training data — which might be wrong, outdated, or hallucinated. With RAG, we first convert the user's question into a vector using an embedding model. Then we search our pgvector database for the most semantically similar text chunks from the actual Hyundai brochures we uploaded. We pass those chunks as context to Gemini along with a strict instruction: 'Only answer from this context.' So Gemini is acting like a very smart reader of a specific document, not a free-form oracle. Every fact it states has a citation — 'Alcazar Brochure, page 12.' That's the whole point: grounded, verifiable answers."
+**Q3: Why 1536 dimensions instead of the full 3072 from Gemini?**
 
----
+Three reasons:
+1. pgvector's HNSW index has a hard limit of 2000 dimensions
+2. `gemini-embedding-001` returns 3072 dimensions by default — too large for HNSW
+3. Google designed `gemini-embedding-001` as a **Matryoshka embedding**: the first N values already capture
+   the core semantic meaning. Truncating to 1536 and L2-normalizing gives 95%+ of the quality
+   at half the storage and much faster HNSW build time
 
-### Question 3: What breaks if the embedding dimension doesn't match?
-
-**Natural answer:**
-
-> "An embedding is a fixed-length list of numbers representing the meaning of text. `gemini-embedding-001` by default outputs 3072 numbers. If I define the pgvector column as `vector(1536)`, every time we try to store a 3072-number vector, we either get a database error or silent truncation. Even worse — if we stored chunks with one model giving 1536-dim vectors and later switched the query to use 3072-dim vectors, the cosine similarity math completely breaks because you can't compare vectors of different sizes. It's like trying to find the angle between a 2D point and a 3D point — it's undefined. That's why we lock the dimension in the Flyway migration SQL AND in the Spring AI config, and we validate they match on startup."
-
----
-
-### Correction after re-reading the repo and current docs (23 Nov 2026)
-
-The earlier Phase 1 note treats `vector(3072)` plus an HNSW index as the safe choice. That migration will fail on Supabase.
-
-pgvector can **store** a 3072-dimension `vector`, but an HNSW or IVFFlat index on the `vector` type allows at most **2,000 dimensions** (pgvector 0.7+; still true in the 0.8 line). Supabase documents the same limit. `V3__create_document_chunks_pgvector.sql` creates `USING hnsw (embedding vector_cosine_ops)` on `vector(3072)`. Flyway will stop with an error like "column cannot have more than 2000 dimensions for hnsw index".
-
-`gemini-embedding-001` still defaults to 3072 and can be shortened to 768, 1536, or 3072. Google says the full 3072 vector is already normalized. A shortened vector from this model is **not** normalized, so we must L2-normalize it ourselves before cosine search. `gemini-embedding-2` auto-normalizes shortened vectors, but its embedding space is incompatible with `gemini-embedding-001`, so we do not mix them.
-
-Recommended lock, pending approval: `gemini-embedding-001`, output size **1536**, column `vector(1536)`, HNSW with `vector_cosine_ops`, normalize every vector in Java before insert and before query.
-
-`gemini-2.0-flash` was shut down on 1 June 2026. The value in `application.yml` will not answer chat requests. Replacement candidates to confirm in Phase 2: `gemini-3.5-flash-lite` (cheaper, better free-tier fit) or `gemini-3.6-flash` (stronger tables). Do not enable Google Search grounding; that would answer from the web instead of the brochures.
+We also L2-normalize (make the vector length = 1) so that cosine similarity = dot product,
+which HNSW can compute very fast.
 
 ---
 
-*More questions will be added after each phase.*
+## Phase 2 — Backend Scaffold & Database Migrations
 
+**Q4: Why Flyway instead of Hibernate `ddl-auto: create` or `update`?**
 
----
+`ddl-auto: create` drops and recreates tables on every restart — you lose all data.
+`ddl-auto: update` tries to infer what changed and apply diffs — it often gets it wrong
+(e.g., it can't rename a column, only add one).
 
-## Phase 2 — Scaffolding, Spring Boot 3.4 + Spring AI 1.1.8, Database & Flyway
+Flyway uses versioned migration scripts (`V1__init.sql`, `V2__documents.sql`…).
+Every migration runs exactly once, in order, and is never modified.
+If you need to change the schema, you create a new migration.
+This means: **the schema in production always matches the code**, and you have a full audit trail.
 
-### Topics You Should Be Able to Explain
+**Q5: Why use `baseline-on-migrate=true` with `baseline-version=0` for Supabase?**
 
-- How Spring AI dependencies interact with Spring Boot versions (Spring Framework 6 vs 7)
-- Why Flyway migrations are preferred over `hibernate.ddl-auto=update`
-- What the health check endpoint does and how it prevents free-tier cold starts
-- Why we isolate database configurations for unit/integration tests with `@ActiveProfiles("test")`
-- How the vector extension (`pgvector`) is enabled via Flyway SQL migration
+Supabase's `public` schema is never completely empty — Supabase pre-creates internal tables.
+Flyway treats any existing schema as "already has migrations applied" and fails with
+"Found non-empty schema but no schema history table."
 
----
+`baseline-on-migrate=true` tells Flyway: "this schema already existed; create a fake baseline entry
+at version 0 and then run all my migrations starting from V1."
+Setting `baseline-version=0` (not 1) ensures V1 is NOT skipped — all 6 migrations apply cleanly.
 
-### Question 1: Why should we use Flyway migrations instead of letting Hibernate create tables (`ddl-auto=update`)?
+**Q6: Why is JWT stored in the Authorization header (Bearer token) instead of cookies?**
 
-**Natural answer:**
-
-> "In production and enterprise systems, `ddl-auto=update` is dangerous and non-deterministic. It can alter existing tables unexpectedly, drop constraints, or fail silently during concurrent cluster startups. Flyway gives us version-controlled, immutable SQL scripts (`V1__...`, `V2__...`) that run deterministically in order across all environments — local dev, CI/CD pipelines, and cloud production. It also records each applied migration with a checksum in the `flyway_schema_history` table, making rollbacks and schema audits clear and safe."
-
----
-
-### Question 2: How did you handle the dependency alignment between Spring Boot and Spring AI?
-
-**Natural answer:**
-
-> "Spring AI is evolving rapidly. Milestone 2.1.0-RC2 targets the upcoming Spring Framework 7 (which introduces internal retry structures like `org.springframework.core.retry.RetryTemplate`), whereas Spring Boot 3.4 runs on Spring Framework 6.2 with `spring-retry`. When building on Spring Boot 3.4, pinning the Spring AI BOM to the production-aligned `1.1.8` line ensures that all transitive dependencies—such as `spring-ai-starter-model-google-genai` and `spring-ai-starter-model-google-genai-embedding`—work cohesively with Spring Boot 3's runtime and classloader without ClassNotFoundExceptions."
-
----
-
-### Question 3: Why do we have a public `/api/health` endpoint that pings the database?
-
-**Natural answer:**
-
-> "Free-tier hosting providers (like Render or Koyeb) spin down inactive applications after 15 to 60 minutes of inactivity. When a user finally visits, they experience a 30-to-50-second cold start while the JVM initializes. Having a lightweight `/api/health` endpoint serves two functions: first, an external free uptime monitor (like Cron-job.org or UptimeRobot) can ping it every 10–14 minutes to keep the backend warm; second, the endpoint performs a quick `SELECT 1` query to verify that the PostgreSQL database connection pool is healthy, returning HTTP 200 when alive or HTTP 503 when degraded."
+We're building an API-first backend that serves both a web SPA and potentially a mobile app.
+HttpOnly cookies work well for same-origin requests but are complex for cross-origin APIs.
+Bearer tokens in the Authorization header work universally (fetch, Axios, curl, Retrofit).
+We mitigate XSS risk by keeping short expiry times (1 hour) and using refresh tokens (7 days)
+that are rotated on use.
 
 ---
 
----
+## Phase 3 — JWT Auth
 
-## Phase 4 — Frontend Design System, React + Vite, Shell & Pages
+**Q7: What is the difference between the access token and refresh token?**
 
-### Topics You Should Be Able to Explain
+The **access token** is short-lived (1 hour). It travels in every API request's
+`Authorization: Bearer <token>` header. Because it's short-lived, a stolen token
+expires quickly.
 
-- Why Tailwind v4 uses CSS variables in `@theme` and `@import "tailwindcss"` instead of `tailwind.config.js`
-- How the Axios interceptor manages JWT Bearer tokens and handles token refresh on 401
-- How route guards (`Protected` and `Guest`) work in React Router with `AuthProvider`
-- Why smooth scrolling (Lenis) must be disabled or isolated on chat log containers (`data-lenis-prevent`)
-- How the password strength calculator evaluates user security without external dependencies
-- How server-sent events (SSE) and streamed markdown are formatted with tables and source citations
+The **refresh token** is long-lived (7 days) and stored client-side. It is only sent
+to the `/api/auth/refresh` endpoint to get a new access token. This separates
+"proving who I am" (refresh) from "making API calls" (access), so the high-value
+refresh token is transmitted much less frequently.
 
----
+**Q8: Why BCrypt with strength 12 instead of SHA-256 or MD5?**
 
-### Question 1: How does your frontend handle authentication state and expired tokens?
-
-**Natural answer:**
-
-> "We use a React Context (`AuthProvider`) combined with Axios request and response interceptors. When a user logs in, the access and refresh tokens are stored in `localStorage`. The Axios request interceptor attaches the access token to the `Authorization: Bearer <token>` header for all outgoing API calls. If the backend responds with a 401 Unauthorized, the response interceptor catches it, pauses queued requests, calls `POST /api/auth/refresh` with the refresh token to get a new access token, updates storage, and transparently retries the original request. If the refresh token is also invalid or expired, the user is logged out and redirected to `/login`."
-
----
-
-### Question 2: Why did you isolate smooth scrolling (Lenis) on the Chat page?
-
-**Natural answer:**
-
-> "Lenis provides premium inertial smooth scrolling across the main layout, but virtual smooth-scrolling engines hijack native scroll event listeners. In an AI chat interface where responses stream token-by-token and auto-scroll must follow the bottom anchor, Lenis would fight against programmatic scroll updates (`scrollIntoView` or `scrollTop = scrollHeight`). We added `data-lenis-prevent` to the message history container and disabled Lenis window listening on the chat route so native, instant auto-scrolling works cleanly without stutter."
+SHA-256 and MD5 are fast — which is bad for passwords, because an attacker can try
+billions of guesses per second (brute force / rainbow tables).
+BCrypt is intentionally slow: strength 12 means 2^12 = 4096 iterations.
+An attacker who steals the hash database would need years to crack even simple passwords.
+The slowness doesn't matter for login (one hash per login attempt by one user) but
+is catastrophic for attackers (billions of guesses).
 
 ---
 
-### Question 3: How are markdown comparison tables and source citations rendered in the UI?
+## Phase 4 — Frontend
 
-**Natural answer:**
+**Q9: Why Vite 8 (Rolldown) instead of webpack or Create React App?**
 
-> "When the AI assistant streams or outputs answers comparing vehicles (like Alcazar vs Creta), it formats the comparison as standard GitHub Flavored Markdown (GFM) tables. We use `react-markdown` with `remark-gfm` configured with custom component overrides for `table`, `thead`, `th`, and `td`. This renders the markdown as modern responsive tables with navy headers, zebra striping, and horizontal overflow protection. In addition, when the backend returns source metadata (document name, page number), we render them as interactive source badge chips below the response that users can inspect."
+Vite uses native ES modules in development — the browser imports files directly
+without bundling. This makes hot-module replacement nearly instant (<100ms) vs
+webpack's 3-10 second rebuilds.
+Rolldown (Vite 8's production bundler, written in Rust) produces the smallest bundles
+with the fastest build times. CRA is deprecated.
 
----
+**Q10: Why Server-Sent Events (SSE) for chat streaming instead of WebSockets?**
 
-## Phases 5–8 — Documents, ingestion, retrieval, chat
-
-### What you should be able to explain
-
-- Upload returns 202 because indexing calls Gemini once per chunk and must not hold the HTTP thread.
-- A comparison searches each vehicle separately, then the model writes one table from both result sets.
-- If no chunk passes the similarity threshold, we do not call Gemini. The fixed sentence is the whole answer.
-- Page numbers come from reading the PDF one page at a time, not from guessing after a single full-text extract.
-
-### Question 1: Why is the vector 1536 if the model can emit 3072?
-
-> "pgvector will store 3072 numbers, but it refuses to build the HNSW index we need once the width passes 2000. Google’s embedding model is Matryoshka-trained, so the first 1536 numbers are a supported size. We L2-normalize that shorter vector ourselves, because only the full 3072 vector arrives already normalized. Cosine search is a direction comparison, so an unnormalized vector would rank by magnitude as well as meaning."
-
-### Question 2: Why not one similarity search for “Alcazar vs Creta”?
-
-> "One search returns the nearest chunks in the whole library. The longer brochure, or the one whose wording is closer to the question, fills the top results and the other car disappears. I detect both names and run the same question vector twice, once with a vehicle filter. The prompt then sees two labeled piles and has to say when a cell is missing."
-
-### Question 3: What happens if the brochure is a scan?
-
-> "PDFBox reads characters, not pictures. If the file has almost no letters, ingestion marks it FAILED with a message that it looks image-only. We do not OCR in this version, and we do not pretend the empty text is a brochure the model can answer from."
+WebSockets are bidirectional — necessary for real-time multiplayer apps, collaborative editing, etc.
+Chat streaming is unidirectional: the user sends one message, the server streams back one response.
+SSE is a simple HTTP response that keeps the connection open and sends `data:` lines.
+SSE works through proxies, CDNs, and load balancers with zero special configuration.
+WebSockets require special proxy support (Upgrade headers) and are overkill for this use case.
 
 ---
 
-## Phase 3 — JWT Authentication (register, login, token refresh, protected routes)
+## Phase 5 — Document Ingestion Pipeline
 
-### Topics You Should Be Able to Explain
+**Q11: How does the ingestion pipeline work end-to-end?**
 
-- What JWT is, what it contains, and why it's stateless
-- Why we use BCrypt and what the "strength" number means
-- How Spring Security's filter chain works and where JWT fits
-- Why we use `AuthenticationManager` for login (not check password directly)
-- Why `OncePerRequestFilter` exists and what it does
-- The difference between an access token and a refresh token
-- Why controllers are "thin" and business logic lives in services
-- How `@Valid` and Bean Validation work (and what happens on failure)
-- Why we return generic error messages for bad credentials
+```
+1. User uploads PDF via multipart POST /api/documents/upload
+2. File saved to disk (dev) or Supabase Storage (prod) with a UUID filename
+3. Document record created in DB with status = PENDING
+4. IngestionOrchestrator.ingestAsync() runs on a separate thread pool (@Async)
+5. PDFBox extracts text page by page
+6. ChunkingService splits text at 1600-char boundaries with 200-char overlap
+   (overlap prevents cutting a sentence mid-thought)
+7. For each chunk: EmbeddingService calls gemini-embedding-001 → 3072-dim float[]
+8. VectorMath.fitAndNormalize() truncates to 1536, L2-normalizes
+9. DocumentChunk saved to document_chunks with the vector
+10. Document status updated to COMPLETED (or FAILED with error message)
+```
+
+**Q12: Why chunk at 1600 characters with 200-character overlap?**
+
+A chunk needs to be small enough to be semantically focused (one topic = one vector)
+but large enough to contain a complete thought.
+1600 characters ≈ 250–300 words ≈ a full paragraph or spec block.
+
+Overlap solves the "edge problem": if a sentence about "engine torque" starts at the
+end of chunk 1 and continues in chunk 2, without overlap, neither chunk fully captures it.
+With 200-character overlap, both chunks include enough context.
+
+**Q13: Why is ingestion done asynchronously?**
+
+A large PDF with 50 pages might generate 100+ chunks. Each chunk requires one API call
+to Gemini for embedding (and those calls have rate limits and latency).
+If we did this synchronously during the HTTP request, the upload endpoint would take
+60+ seconds to respond — the browser would time out.
+
+Async ingestion returns immediately with `status: PENDING`, then the ingestion runs
+in the background. The UI polls (or the user refreshes) until `status: COMPLETED`.
 
 ---
 
-### Question 1: What is a JWT and why is it stateless?
+## Phase 6 — RAG Chat
 
-**Natural answer:**
+**Q14: What is "grounding" and why does it prevent hallucinations?**
 
-> "JWT stands for JSON Web Token. It has three Base64-encoded parts separated by dots: a header (algorithm used), a payload (claims like user ID, email, role, expiry), and a signature. The server signs it with a secret key using HMAC-SHA256. On every request, the client sends this token in the `Authorization: Bearer <token>` header. The server just verifies the signature — if it's valid and not expired, the user is authenticated. No session stored anywhere. That's what stateless means: the server can verify who you are without checking a database or a session store. This is why JWT scales well — any instance of the server can verify the token independently."
+Grounding means: before calling the LLM, we build a prompt that contains the actual
+text from the matching brochure chunks. The LLM's instruction says:
+> "Answer ONLY using the context below. If the answer is not in the context, say 'Not available in the uploaded brochures.'"
+
+The LLM doesn't use its training knowledge about Hyundai cars — it only reads the
+provided context. This prevents:
+- Making up specs for a model variant that doesn't exist in the brochures
+- Confusing specifications from different model years
+
+**Q15: What happens when the user asks about a vehicle not in any uploaded brochure?**
+
+The RAG pipeline runs cosine similarity search. If no chunks score above 0.35 similarity,
+`ChatService` skips the LLM entirely and returns the fixed string:
+> "I'm sorry, but that information is not available in the uploaded brochures."
+
+This is better than calling the LLM with no context — without context, the LLM would
+either hallucinate from training data or refuse to answer. We skip the API call entirely,
+saving cost and latency.
+
+**Q16: How does the VehicleQueryPlanner work?**
+
+It's a lightweight keyword-extraction layer that runs before vector search:
+1. It detects vehicle names in the question ("Alcazar", "Creta", "i20")
+2. It detects the query aspect ("engine", "safety", "price", "variants")
+3. It detects if it's a comparison question (contains "vs", "compare", "versus")
+4. It detects if it's a recommendation question ("recommend", "suggest", "which one")
+
+The detected vehicles are used to narrow the vector search to only those vehicles' chunks.
+This prevents irrelevant chunks from other vehicles polluting the context.
 
 ---
 
-### Question 2: Why BCrypt? What does the strength (cost factor) number mean?
+## Phase 7 — Live Database (Supabase + pgvector)
 
-**Natural answer:**
+**Q17: Why local disk storage in dev but Supabase Storage in prod?**
 
-> "BCrypt is a password hashing algorithm specifically designed to be slow. That's the point — it makes brute-force attacks expensive. The strength number (we use 12) is a cost factor. Internally BCrypt runs 2^12 = 4,096 rounds of key derivation. On a modern CPU, BCrypt with strength 12 takes about 250–300ms per hash. If an attacker steals your database, cracking one password takes 250ms instead of microseconds. At scale, cracking a million passwords would take years, not minutes. We don't use MD5 or SHA-256 for passwords because those are designed to be fast — that's the opposite of what you want."
+In development, local disk is instant (no latency, no API calls, no costs).
+In production on Render (free tier), the filesystem is **ephemeral** — every deploy
+wipes the disk. If we stored files locally, every redeploy would lose all uploaded PDFs.
+
+Supabase Storage is a persistent object store (like S3) backed by Supabase's
+infrastructure. Files uploaded to it survive redeploys.
+The `APP_STORAGE_MODE` env var switches between implementations — the application code
+calls `StorageService` interface methods and doesn't know which backend is active.
+
+**Q18: What is the Flyway baseline issue with Supabase and how was it fixed?**
+
+Supabase pre-populates the `public` schema with its own internal tables.
+Flyway's default behavior: if the schema isn't empty and there's no `flyway_schema_history` table,
+it refuses to run (to protect against accidentally running migrations on a database that
+already has user tables from a different source).
+
+Fix: `baseline-on-migrate: true` with `baseline-version: "0"`:
+- Flyway creates a fake entry in `flyway_schema_history` saying "version 0 is the baseline"
+- Then it applies V1, V2, V3, V4, V5, V6 in order
+- Future runs see that V1–V6 are already in history and skip them
+
+**Q19: Why is `rating` stored as INTEGER but the original migration used SMALLINT?**
+
+`SMALLINT` in PostgreSQL is a 2-byte integer (range -32768 to 32767).
+`INTEGER` in PostgreSQL is a 4-byte integer.
+
+Hibernate's `@Column` annotation on a Java `Integer` field generates DDL for `INTEGER`.
+When Hibernate validates the schema (`ddl-auto: validate`), it found `int2` (Supabase's name
+for SMALLINT) but expected `int4` (INTEGER) — schema validation failure.
+
+The fix was:
+1. `ALTER TABLE chat_messages ALTER COLUMN rating TYPE INTEGER;` on the live DB
+2. Update `V6__message_rating.sql` from `SMALLINT` to `INTEGER` for future clean deployments
+
+Since Flyway never re-runs a migration that's already in history, the ALTER was needed
+for the existing column.
 
 ---
 
-### Question 3: Walk me through what happens when a user logs in with wrong credentials.
+## Phase 8 — GitHub
 
-**Natural answer:**
+**Q20: What should be in .gitignore for this project?**
 
-> "The login request hits `POST /api/auth/login`. Spring's `@Valid` runs Bean Validation first — if the email format is wrong or password is blank, it returns 422 before we even touch the database. If validation passes, `AuthService.login()` calls `AuthenticationManager.authenticate()`. This goes through Spring Security's `DaoAuthenticationProvider`, which loads the user from the database by email, then calls `BCryptPasswordEncoder.matches(rawPassword, storedHash)`. If it doesn't match, Spring throws `BadCredentialsException`. We catch that and throw our own `BusinessException` with the message 'Invalid email or password.' — deliberately vague. The `GlobalExceptionHandler` converts that to a 401 JSON response. We never say 'email not found' or 'wrong password' separately — that would tell an attacker which one was correct."
+Critical exclusions:
+- `.env` / `*.env` — Never commit secrets (DB passwords, API keys, JWT secrets)
+- `target/` — Maven build output (can be rebuilt from source)
+- `node_modules/` — npm packages (can be restored with `npm install`)
+- `dist/` — Vite production build output
+- `uploads/` — User-uploaded files (not source code, potentially large)
+- `.idea/`, `.vscode/` — IDE-specific config (team may use different editors)
 
 ---
 
+## Phase 9 — Production Deployment
+
+**Q21: Why Render for the backend and Cloudflare Pages for the frontend?**
+
+Render's free tier supports:
+- Always-on web services (after a cold start delay)
+- Custom build and start commands
+- Persistent environment variables
+- Automatic HTTPS
+
+Cloudflare Pages' free tier supports:
+- 500 builds/month
+- Unlimited bandwidth
+- Global CDN edge delivery
+- Unlimited static hosting
+
+The combination gives zero hosting cost for a demo/portfolio project.
+In production, Render's free tier has ~15 second cold starts after inactivity —
+acceptable for a dealership demo, not for a 24/7 production SaaS.
+
+**Q22: What is CORS and why is it configured as it is?**
+
+CORS (Cross-Origin Resource Sharing) is a browser security policy.
+When the frontend at `https://hyundai.pages.dev` calls the backend at `https://hyundai.onrender.com`,
+the browser blocks the request unless the backend explicitly allows the frontend's origin
+in its `Access-Control-Allow-Origin` response header.
+
+We configure `CORS_ALLOWED_ORIGINS` to exactly match the Cloudflare Pages URL.
+Using `*` (allow all origins) would let any website on the internet call our backend
+using a logged-in user's credentials — a security vulnerability.
+
+---
+
+## General RAG Concepts
+
+**Q23: What is RAG (Retrieval-Augmented Generation) and why not just fine-tune the LLM?**
+
+**Fine-tuning** trains the LLM on your data, baking knowledge into its weights.
+Problems:
+- Expensive (GPU time, labeled training data)
+- The model learns the data at a point in time — stale when the brochures change
+- You need to retrain every time there's a new Hyundai model
+
+**RAG** keeps the LLM's weights unchanged. Instead, it retrieves relevant text
+from your documents at query time and passes it as context.
+Advantages:
+- Zero training cost — just embed and store
+- Instantly up-to-date — upload a new brochure and it's searchable immediately
+- Transparent — you can show users exactly which brochure page the answer came from
+- Controllable — the LLM can't go "off-script" because it's told to answer only from context
+
+For a dealership where brochures change with every model year, RAG is the correct choice.
+
+**Q24: What is cosine similarity and why use it for semantic search?**
+
+Two vectors (embeddings) represent two texts in a high-dimensional semantic space.
+Cosine similarity measures the angle between them: 1.0 = identical meaning, 0.0 = unrelated.
+
+We use cosine similarity because it's **direction-only** — the magnitude (length) of the
+vector doesn't affect the score. After L2-normalizing all embeddings (making them unit vectors),
+cosine similarity = dot product, which HNSW can compute in microseconds.
+
+A score of 0.35 (our threshold) means "somewhat related" — below that, we reject the chunk
+as not relevant enough to include in the LLM's context.

@@ -1,0 +1,42 @@
+# render.yaml — Render.com deployment config
+# This is optional. You can configure Render via the UI instead.
+# See: https://render.com/docs/yaml-spec
+
+services:
+  - type: web
+    name: hyundai-ai-backend
+    runtime: java
+    repo: https://github.com/YOUR_USERNAME/hyundai-ai-assistant  # <-- update this
+    rootDir: backend
+    buildCommand: mvn package -DskipTests -q
+    startCommand: java -jar target/hyundai-ai-assistant-1.0.0.jar
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: DB_URL
+        sync: false     # Set in Render dashboard - never commit secrets
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: GOOGLE_AI_API_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRY_MS
+        value: "3600000"
+      - key: JWT_REFRESH_EXPIRY_MS
+        value: "604800000"
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false     # Set to your Cloudflare Pages URL
+      - key: APP_STORAGE_MODE
+        value: "supabase"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: "brochures"
+      - key: SERVER_PORT
+        value: "8080"

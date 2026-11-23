@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: hyundai
       POSTGRES_DB: hyundai
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - hyundai_pg:/var/lib/postgresql/data
 
