@@ -97,6 +97,45 @@ Recommended lock, pending approval: `gemini-embedding-001`, output size **1536**
 
 ---
 
+---
+
+## Phase 4 — Frontend Design System, React + Vite, Shell & Pages
+
+### Topics You Should Be Able to Explain
+
+- Why Tailwind v4 uses CSS variables in `@theme` and `@import "tailwindcss"` instead of `tailwind.config.js`
+- How the Axios interceptor manages JWT Bearer tokens and handles token refresh on 401
+- How route guards (`Protected` and `Guest`) work in React Router with `AuthProvider`
+- Why smooth scrolling (Lenis) must be disabled or isolated on chat log containers (`data-lenis-prevent`)
+- How the password strength calculator evaluates user security without external dependencies
+- How server-sent events (SSE) and streamed markdown are formatted with tables and source citations
+
+---
+
+### Question 1: How does your frontend handle authentication state and expired tokens?
+
+**Natural answer:**
+
+> "We use a React Context (`AuthProvider`) combined with Axios request and response interceptors. When a user logs in, the access and refresh tokens are stored in `localStorage`. The Axios request interceptor attaches the access token to the `Authorization: Bearer <token>` header for all outgoing API calls. If the backend responds with a 401 Unauthorized, the response interceptor catches it, pauses queued requests, calls `POST /api/auth/refresh` with the refresh token to get a new access token, updates storage, and transparently retries the original request. If the refresh token is also invalid or expired, the user is logged out and redirected to `/login`."
+
+---
+
+### Question 2: Why did you isolate smooth scrolling (Lenis) on the Chat page?
+
+**Natural answer:**
+
+> "Lenis provides premium inertial smooth scrolling across the main layout, but virtual smooth-scrolling engines hijack native scroll event listeners. In an AI chat interface where responses stream token-by-token and auto-scroll must follow the bottom anchor, Lenis would fight against programmatic scroll updates (`scrollIntoView` or `scrollTop = scrollHeight`). We added `data-lenis-prevent` to the message history container and disabled Lenis window listening on the chat route so native, instant auto-scrolling works cleanly without stutter."
+
+---
+
+### Question 3: How are markdown comparison tables and source citations rendered in the UI?
+
+**Natural answer:**
+
+> "When the AI assistant streams or outputs answers comparing vehicles (like Alcazar vs Creta), it formats the comparison as standard GitHub Flavored Markdown (GFM) tables. We use `react-markdown` with `remark-gfm` configured with custom component overrides for `table`, `thead`, `th`, and `td`. This renders the markdown as modern responsive tables with navy headers, zebra striping, and horizontal overflow protection. In addition, when the backend returns source metadata (document name, page number), we render them as interactive source badge chips below the response that users can inspect."
+
+---
+
 ## Phases 5–8 — Documents, ingestion, retrieval, chat
 
 ### What you should be able to explain
