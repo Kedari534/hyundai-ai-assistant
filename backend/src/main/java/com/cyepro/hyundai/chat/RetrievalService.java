@@ -45,12 +45,32 @@ public class RetrievalService {
     }
 
     private List<RetrievedChunk> search(String vectorLiteral, String vehicle) {
+        if (vehicle == null || vehicle.isBlank()) {
+            String sql = """
+                    SELECT document_id, document_name, vehicle_model, page_number, content,
+                           1 - (embedding <=> CAST(? AS vector)) AS similarity
+                    FROM document_chunks
+                    WHERE embedding IS NOT NULL
+                    ORDER BY embedding <=> CAST(? AS vector)
+                    LIMIT ?
+                    """;
+            List<RetrievedChunk> rows = jdbc.query(sql, (rs, row) -> new RetrievedChunk(
+                    rs.getObject("document_id", UUID.class),
+                    rs.getString("document_name"),
+                    rs.getString("vehicle_model"),
+                    rs.getInt("page_number"),
+                    rs.getString("content"),
+                    rs.getDouble("similarity")
+            ), vectorLiteral, vectorLiteral, topK);
+            return rows.stream().filter(chunk -> chunk.similarity() >= minSimilarity).toList();
+        }
+
         String sql = """
                 SELECT document_id, document_name, vehicle_model, page_number, content,
                        1 - (embedding <=> CAST(? AS vector)) AS similarity
                 FROM document_chunks
                 WHERE embedding IS NOT NULL
-                  AND (? IS NULL OR vehicle_model = ?)
+                  AND vehicle_model = ?
                 ORDER BY embedding <=> CAST(? AS vector)
                 LIMIT ?
                 """;
@@ -61,7 +81,7 @@ public class RetrievalService {
                 rs.getInt("page_number"),
                 rs.getString("content"),
                 rs.getDouble("similarity")
-        ), vectorLiteral, vehicle, vehicle, vectorLiteral, topK);
+        ), vectorLiteral, vehicle, vectorLiteral, topK);
         return rows.stream().filter(chunk -> chunk.similarity() >= minSimilarity).toList();
     }
 
