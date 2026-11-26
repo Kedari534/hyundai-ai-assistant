@@ -84,7 +84,16 @@ body,
 h1, h2, h3, h4, h5, h6, .font-heading {
   font-family: var(--font-heading);
   letter-spacing: -0.025em;
-  color: var(--color-navy);
+}
+
+/* Ensure brand panel text and headings stay pure crisp white */
+.brand-panel h1,
+.brand-panel h2,
+.brand-panel h3,
+.brand-panel h4,
+.brand-panel h5,
+.brand-panel h6 {
+  color: #ffffff !important;
 }
 
 /* Browser Autofill Color Fix (Prevents ugly yellow / blue background) */

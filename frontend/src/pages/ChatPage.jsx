@@ -117,7 +117,7 @@ export default function ChatPage() {
   }, [sessionId])
 
   useEffect(() => {
-    if (nearBottom && listRef.current) {
+    if (messages.length > 0 && nearBottom && listRef.current) {
       listRef.current.scrollTop = listRef.current.scrollHeight
     }
   }, [messages, nearBottom])

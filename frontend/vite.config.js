@@ -5,7 +5,20 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://localhost:8080',
+      '/api': {
+        target: 'https://hyundai-ai-assistant.onrender.com',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
+  preview: {
+    proxy: {
+      '/api': {
+        target: 'https://hyundai-ai-assistant.onrender.com',
+        changeOrigin: true,
+        secure: false,
+      },
     },
   },
   build: {

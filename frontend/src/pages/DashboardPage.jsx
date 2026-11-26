@@ -69,7 +69,7 @@ export default function DashboardPage() {
             size="sm"
             variant="secondary"
             onClick={() => navigate('/documents')}
-            className="hidden sm:inline-flex"
+            className="hidden md:inline-flex"
           >
             <Upload className="h-3.5 w-3.5" /> Upload Brochure
           </Button>
