@@ -436,9 +436,10 @@ function Message({ message, onCopy, onRegenerate, onRate, onOpenSources, disable
       {message.pending && !message.content && <Typing />}
 
       <div className={message.pending ? 'caret' : ''}>
+        {parts.general && <AnswerBlock text={parts.general} />}
         {parts.confirmed && <AnswerBlock title="Confirmed Specifications & Facts" text={parts.confirmed} />}
         {parts.recommendation && <AnswerBlock title="Consultant Recommendation" text={parts.recommendation} tint />}
-        {!parts.confirmed && !parts.recommendation && message.content && <AnswerBlock text={message.content} />}
+        {!parts.general && !parts.confirmed && !parts.recommendation && message.content && <AnswerBlock text={message.content} />}
       </div>
 
       {!message.pending && message.content && (
@@ -531,13 +532,23 @@ function markMissing(children) {
 
 function splitAnswer(markdown) {
   if (!markdown) return {}
-  const recMatch = markdown.split(/## Recommendation/i)
-  if (recMatch.length === 1) {
-    return { confirmed: markdown.replace(/## Confirmed from brochures/i, '').trim() }
+  const hasConfirmed = /## Confirmed from brochures/i.test(markdown)
+  const hasRecommendation = /## Recommendation/i.test(markdown)
+
+  if (!hasConfirmed && !hasRecommendation) {
+    return { general: markdown.trim() }
   }
+
+  if (hasRecommendation) {
+    const recMatch = markdown.split(/## Recommendation/i)
+    return {
+      confirmed: recMatch[0].replace(/## Confirmed from brochures/i, '').trim(),
+      recommendation: recMatch.slice(1).join('## Recommendation').trim(),
+    }
+  }
+
   return {
-    confirmed: recMatch[0].replace(/## Confirmed from brochures/i, '').trim(),
-    recommendation: recMatch.slice(1).join('## Recommendation').trim(),
+    confirmed: markdown.replace(/## Confirmed from brochures/i, '').trim(),
   }
 }
 

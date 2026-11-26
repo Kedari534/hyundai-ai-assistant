@@ -188,4 +188,39 @@ class ChatServiceTest {
         assertThat(assistantMessage.getRole()).isEqualTo("ASSISTANT");
         assertThat(assistantMessage.getContent()).contains(GroundingPrompt.NOT_AVAILABLE);
     }
+
+    @Test
+    @DisplayName("Greetings return immediate welcome message without retrieval or LLM call")
+    void greetingsReturnWelcomeDirectly() {
+        UUID sessionId = UUID.randomUUID();
+        ChatSession session = ChatSession.builder()
+                .id(sessionId)
+                .userId(testUser.getId())
+                .title("New conversation")
+                .build();
+
+        when(sessionRepository.findById(sessionId)).thenReturn(Optional.of(session));
+        when(messageRepository.save(any(ChatMessage.class))).thenAnswer(i -> {
+            ChatMessage m = i.getArgument(0);
+            m.setId(UUID.randomUUID());
+            return m;
+        });
+
+        SseEmitter emitter = chatService.stream(testUser, sessionId, "Hi", false);
+
+        assertThat(emitter).isNotNull();
+
+        // Retrieval and ChatClient must NEVER be called for a greeting
+        verifyNoInteractions(planner);
+        verifyNoInteractions(retrieval);
+        verifyNoInteractions(chatClient);
+
+        ArgumentCaptor<ChatMessage> captor = ArgumentCaptor.forClass(ChatMessage.class);
+        verify(messageRepository, atLeast(2)).save(captor.capture());
+
+        List<ChatMessage> savedMessages = captor.getAllValues();
+        ChatMessage assistantMessage = savedMessages.get(savedMessages.size() - 1);
+        assertThat(assistantMessage.getRole()).isEqualTo("ASSISTANT");
+        assertThat(assistantMessage.getContent()).contains("Hyundai Automotive AI Consultant");
+    }
 }

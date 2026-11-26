@@ -118,8 +118,33 @@ public class ChatService {
         return emitter;
     }
 
+    public static final String GREETING_MESSAGE = """
+            Hello! I am your **Hyundai Automotive AI Consultant** at Cyepro Solutions.
+
+            I can assist you with verified technical specifications, variant matrices, engine details, and side-by-side comparisons directly from our official Hyundai brochures:
+            - **Hyundai Alcazar** (Strategic 6/7-Seater Premium SUV)
+            - **Hyundai Creta** (India's Best-Selling Midsize SUV)
+            - **Hyundai i20** (Premium Hatchback)
+            - **Hyundai Aura** (Sub-4m Strategic Family Sedan)
+
+            **How can I assist you today?** You can ask:
+            - *"What are the engine specs and mileage of the Alcazar?"*
+            - *"Compare Alcazar vs Creta in seating, boot space, and dimensions."*
+            - *"Should I recommend the i20 or Aura for daily city driving?"*
+            - *"Compare all petrol and diesel engines across models."*
+            """;
+
     private void answer(SseEmitter emitter, ChatSession session, String question) {
         try {
+            if (isGreeting(question)) {
+                send(emitter, "token", GREETING_MESSAGE);
+                ChatMessage saved = saveAssistant(session, GREETING_MESSAGE, List.of());
+                send(emitter, "sources", List.of());
+                send(emitter, "done", Map.of("messageId", saved.getId().toString(), "content", GREETING_MESSAGE));
+                emitter.complete();
+                return;
+            }
+
             VehicleQueryPlanner.RetrievalPlan plan = planner.plan(question);
             String search = planner.searchText(question, plan);
             List<RetrievedChunk> chunks;
@@ -270,6 +295,21 @@ public class ChatService {
         } catch (IOException ex) {
             throw new IllegalStateException("Client disconnected", ex);
         }
+    }
+
+    private boolean isGreeting(String question) {
+        if (question == null) {
+            return false;
+        }
+        String cleaned = question.trim().toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[!.,?]+$", "").trim();
+        return switch (cleaned) {
+            case "hi", "hello", "hey", "hola", "namaste",
+                 "good morning", "good afternoon", "good evening", "good day",
+                 "greetings", "hi there", "hello there", "hey there",
+                 "help", "who are you", "what can you do", "start" -> true;
+            default -> false;
+        };
     }
 
     private ChatSession owned(User user, UUID sessionId) {
