@@ -44,7 +44,7 @@ export default function Shell({ title, description, action, children }) {
   const initials = (user?.fullName || 'U').split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()
 
   return (
-    <div className="min-h-full bg-canvas text-ink">
+    <div className={`bg-canvas text-ink ${chat ? 'h-screen overflow-hidden' : 'min-h-full'}`}>
       <a href="#content" className="skip-link">Skip to content</a>
       {open && <button className="fixed inset-0 z-30 bg-navy/40 md:hidden" aria-label="Close menu" onClick={() => setOpen(false)} />}
       <aside className={`fixed inset-y-0 left-0 z-40 flex flex-col bg-navy text-white transition-[width,transform] duration-200 ${collapsed ? 'md:w-[72px]' : 'md:w-[264px]'} w-[264px] ${open ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
@@ -65,7 +65,7 @@ export default function Shell({ title, description, action, children }) {
               <NavLink
                 key={link.to}
                 to={link.to}
-                className={({ isActive }) => `flex min-h-11 items-center gap-3 rounded-[8px] px-3 text-sm ${isActive ? 'bg-white/10' : 'text-white/75 hover:bg-white/5'} ${collapsed ? 'md:justify-center md:px-0' : ''}`}
+                className={({ isActive }) => `flex min-h-11 items-center gap-3 rounded-[8px] px-3 text-sm font-medium transition-colors ${isActive ? 'bg-accent text-white shadow-sm' : 'text-white/75 hover:bg-white/10 hover:text-white'} ${collapsed ? 'md:justify-center md:px-0' : ''}`}
               >
                 <Icon className="h-5 w-5 shrink-0" strokeWidth={1.75} />
                 <span className={collapsed ? 'md:hidden' : ''}>{link.label}</span>
@@ -75,32 +75,32 @@ export default function Shell({ title, description, action, children }) {
         </nav>
         <div className="border-t border-white/10 p-3">
           <button
-            className="flex min-h-11 w-full items-center gap-3 rounded-[8px] px-2 text-left hover:bg-white/5"
+            className="flex min-h-11 w-full items-center gap-3 rounded-[8px] px-2 text-left hover:bg-white/5 transition-colors"
             onClick={() => { logout(); navigate('/login') }}
           >
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/10 text-xs">{initials}</span>
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/10 text-xs font-semibold">{initials}</span>
             <span className={`min-w-0 ${collapsed ? 'md:hidden' : ''}`}>
-              <span className="block truncate text-sm">{user?.fullName}</span>
+              <span className="block truncate text-sm font-medium text-white">{user?.fullName}</span>
               <span className="block truncate text-xs text-white/60">Sign out</span>
             </span>
           </button>
         </div>
       </aside>
-      <div className={collapsed ? 'md:pl-[72px]' : 'md:pl-[264px]'}>
-        <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-line bg-canvas/95 px-4 backdrop-blur md:px-8">
+      <div className={`${collapsed ? 'md:pl-[72px]' : 'md:pl-[264px]'} ${chat ? 'h-screen flex flex-col overflow-hidden' : ''}`}>
+        <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center gap-3 border-b border-line bg-canvas/95 px-4 backdrop-blur md:px-8">
           <button className="inline-flex h-11 w-11 items-center justify-center rounded-[8px] md:hidden" aria-label="Open navigation" onClick={() => setOpen(true)}>
             <Menu className="h-5 w-5" />
           </button>
-          <button className="hidden h-11 w-11 items-center justify-center rounded-[8px] hover:bg-white md:inline-flex" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => setCollapsed((value) => !value)}>
+          <button className="hidden h-11 w-11 items-center justify-center rounded-[8px] hover:bg-white md:inline-flex transition-colors" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => setCollapsed((value) => !value)}>
             <PanelLeft className="h-5 w-5" strokeWidth={1.75} />
           </button>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate font-heading text-lg md:text-xl">{title}</h1>
-            {description ? <p className="hidden truncate text-sm text-muted md:block">{description}</p> : null}
+            <h1 className="truncate font-heading text-lg md:text-xl font-bold text-navy">{title}</h1>
+            {description ? <p className="hidden truncate text-xs text-muted md:block">{description}</p> : null}
           </div>
           {action}
         </header>
-        <main id="content" className={chat ? 'h-[calc(100vh-64px)]' : 'mx-auto w-full max-w-[1200px] px-4 py-6 md:px-8 md:py-8'}>
+        <main id="content" className={chat ? 'flex-1 min-h-0 overflow-hidden' : 'mx-auto w-full max-w-[1200px] px-4 py-6 md:px-8 md:py-8'}>
           {children}
         </main>
       </div>
