@@ -25,8 +25,10 @@ public final class GroundingPrompt {
                   * Keep column widths balanced and readable.
                 - Follow the table with concise bullet-point highlights summarizing key differences.
                 - Start the factual portion with the heading: ## Confirmed from brochures
-                - If the user asked for a recommendation, add a second heading: ## Recommendation
-                  The recommendation must be objective and only repeat facts already established under Confirmed from brochures.
+                - When the user asks for a recommendation (e.g. between vehicles, for daily city driving, or for a family):
+                  Under the ## Recommendation heading, provide an objective, expert recommendation by directly connecting the confirmed brochure facts to the use case.
+                  * Example: Explain which vehicle suits the requirement best based on dimensions, boot space, transmission, safety, or fuel efficiency from the brochures.
+                  * Do NOT write "Not available in the uploaded brochures" under Recommendation when the confirmed facts provide clear comparison data. Synthesize the facts into an actionable recommendation.
                 - Be concise, direct, and fast — avoid filler phrases.
                 - Prior conversation is for pronouns only. It is not a source of specifications.
                 """;

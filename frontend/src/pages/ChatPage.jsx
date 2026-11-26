@@ -9,6 +9,8 @@ import {
   Copy,
   FileText,
   Gauge,
+  History,
+  PanelLeftClose,
   Plus,
   Send,
   ShieldCheck,
@@ -17,7 +19,8 @@ import {
   ThumbsDown,
   ThumbsUp,
   Trash2,
-  Users
+  Users,
+  X
 } from 'lucide-react'
 import { toast } from 'sonner'
 import Shell from '../components/Shell'
@@ -73,6 +76,8 @@ export default function ChatPage() {
   const [streaming, setStreaming] = useState(false)
   const [sources, setSources] = useState([])
   const [nearBottom, setNearBottom] = useState(true)
+  const [showHistory, setShowHistory] = useState(true)
+  const [showSources, setShowSources] = useState(false)
   const listRef = useRef(null)
   const abortRef = useRef(null)
 
@@ -179,51 +184,94 @@ export default function ChatPage() {
   const groups = groupSessions(sessions)
 
   return (
-    <Shell title="Consultant" description="AI automotive consultant with strict RAG retrieval from official Hyundai brochures.">
-      <div className="grid h-full md:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)_320px] overflow-hidden">
-        {/* Conversations Sidebar */}
-        <aside className="hidden h-full flex-col border-r border-line bg-surface md:flex overflow-hidden" data-lenis-prevent>
-          <div className="p-3 border-b border-line/60">
-            <Button className="w-full shadow-sm hover:shadow" variant="secondary" onClick={() => navigate('/chat')}>
-              <Plus className="h-4 w-4 mr-1 text-accent" /> New conversation
-            </Button>
-          </div>
-          <div className="flex-1 overflow-y-auto px-2 py-3" data-lenis-prevent>
-            {groups.map((group) => (
-              <div key={group.label} className="mb-4">
-                <p className="px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-muted/80">{group.label}</p>
-                {group.items.map((session) => (
-                  <div
-                    key={session.id}
-                    className={`group flex items-center rounded-[10px] my-0.5 transition-colors ${
-                      session.id === sessionId
-                        ? 'bg-accent-tint text-navy font-semibold shadow-xs'
-                        : 'text-ink/80 hover:bg-canvas hover:text-ink'
-                    }`}
-                  >
-                    <Link className="min-w-0 flex-1 truncate px-2.5 py-2 text-sm" to={`/chat/${session.id}`}>
-                      {session.title}
-                    </Link>
-                    <button
-                      className="mr-1 hidden h-7 w-7 items-center justify-center rounded-md text-muted hover:text-danger hover:bg-white group-hover:inline-flex transition-colors"
-                      aria-label="Delete conversation"
-                      onClick={() => removeSession(session.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        </aside>
+    <Shell
+      title="Consultant"
+      description="Official Hyundai brochure AI consultant"
+      action={
+        <div className="flex items-center gap-2">
+          <button
+            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold border transition-all ${
+              showHistory
+                ? 'border-line bg-surface text-ink hover:bg-canvas'
+                : 'border-accent/40 bg-accent-tint text-accent hover:bg-accent-tint/80'
+            }`}
+            onClick={() => setShowHistory((v) => !v)}
+            title={showHistory ? 'Hide chat history to expand reading area' : 'Show chat history'}
+          >
+            <History className="h-3.5 w-3.5 text-accent" />
+            <span>{showHistory ? 'Hide History' : 'History'}</span>
+          </button>
 
-        {/* Chat Feed */}
-        <section className="relative flex h-full min-w-0 flex-col overflow-hidden bg-canvas">
-          <div ref={listRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-6 md:px-8" data-lenis-prevent>
+          {sources.length > 0 && (
+            <button
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold border transition-all ${
+                showSources
+                  ? 'border-accent bg-accent text-white shadow-xs'
+                  : 'border-line bg-surface text-ink hover:bg-canvas'
+              }`}
+              onClick={() => setShowSources((v) => !v)}
+              title={showSources ? 'Hide sources panel' : 'View verified sources'}
+            >
+              <FileText className="h-3.5 w-3.5" />
+              <span>Sources ({sources.length})</span>
+            </button>
+          )}
+        </div>
+      }
+    >
+      <div className="flex h-full w-full overflow-hidden">
+        {/* Conversations Sidebar (Collapsible) */}
+        {showHistory && (
+          <aside className="hidden h-full w-[240px] shrink-0 flex-col border-r border-line bg-surface md:flex overflow-hidden transition-all duration-200" data-lenis-prevent>
+            <div className="flex items-center justify-between p-2.5 border-b border-line/60">
+              <Button className="flex-1 shadow-sm hover:shadow text-xs py-1.5" variant="secondary" onClick={() => navigate('/chat')}>
+                <Plus className="h-3.5 w-3.5 mr-1 text-accent" /> New chat
+              </Button>
+              <button
+                className="ml-1 p-1.5 rounded-md text-muted hover:text-navy hover:bg-canvas transition-colors"
+                title="Collapse history"
+                onClick={() => setShowHistory(false)}
+              >
+                <PanelLeftClose className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 py-3" data-lenis-prevent>
+              {groups.map((group) => (
+                <div key={group.label} className="mb-4">
+                  <p className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-muted/80">{group.label}</p>
+                  {group.items.map((session) => (
+                    <div
+                      key={session.id}
+                      className={`group flex items-center rounded-[8px] my-0.5 transition-colors ${
+                        session.id === sessionId
+                          ? 'bg-accent-tint text-navy font-semibold shadow-xs'
+                          : 'text-ink/80 hover:bg-canvas hover:text-ink'
+                      }`}
+                    >
+                      <Link className="min-w-0 flex-1 truncate px-2.5 py-1.5 text-xs" to={`/chat/${session.id}`}>
+                        {session.title}
+                      </Link>
+                      <button
+                        className="mr-1 hidden h-6 w-6 items-center justify-center rounded-md text-muted hover:text-danger hover:bg-white group-hover:inline-flex transition-colors"
+                        aria-label="Delete conversation"
+                        onClick={() => removeSession(session.id)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </aside>
+        )}
+
+        {/* Spacious Main Chat Feed */}
+        <section className="relative flex h-full flex-1 min-w-0 flex-col overflow-hidden bg-canvas">
+          <div ref={listRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-6 md:px-8 lg:px-12" data-lenis-prevent>
             {messages.length === 0 && (
-              <div className="mx-auto max-w-3xl py-4">
-                <div className="mb-6 flex items-center gap-2">
+              <div className="mx-auto max-w-4xl py-6">
+                <div className="mb-4 flex items-center gap-2">
                   <span className="flex h-6 items-center rounded-full bg-accent/10 px-2.5 text-xs font-semibold uppercase tracking-wider text-accent">
                     Dealership Assistant
                   </span>
@@ -232,22 +280,22 @@ export default function ChatPage() {
                 <h2 className="font-heading text-3xl font-bold tracking-tight text-navy">
                   Ask from the brochures on file.
                 </h2>
-                <p className="mt-1 text-sm text-muted">
+                <p className="mt-1.5 text-sm text-muted">
                   Instant factual comparisons, variants analysis, specifications & recommendations with zero hallucination.
                 </p>
 
-                <div className="mt-8 grid gap-3.5 sm:grid-cols-2">
+                <div className="mt-8 grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
                   {promptCards.map((item) => {
                     const Icon = item.icon
                     return (
                       <button
                         key={item.title}
-                        className="group flex flex-col text-left rounded-[14px] border border-line bg-surface p-4.5 transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-md"
+                        className="group flex flex-col text-left rounded-[14px] border border-line bg-surface p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-md"
                         onClick={() => send(item.prompt)}
                       >
-                        <div className="flex items-center gap-2.5 mb-2">
-                          <span className="grid h-8 w-8 place-items-center rounded-[8px] bg-accent/10 text-accent transition-colors group-hover:bg-accent group-hover:text-white">
-                            <Icon className="h-4 w-4" />
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="grid h-7 w-7 place-items-center rounded-[8px] bg-accent/10 text-accent transition-colors group-hover:bg-accent group-hover:text-white">
+                            <Icon className="h-3.5 w-3.5" />
                           </span>
                           <span className="font-heading text-sm font-bold text-navy group-hover:text-accent">
                             {item.title}
@@ -263,7 +311,7 @@ export default function ChatPage() {
               </div>
             )}
 
-            <div className="mx-auto flex max-w-4xl flex-col gap-5">
+            <div className="mx-auto flex w-full max-w-5xl xl:max-w-6xl flex-col gap-5">
               {messages.map((message) => (
                 <Message
                   key={message.id}
@@ -274,6 +322,7 @@ export default function ChatPage() {
                   }}
                   onRegenerate={() => send('', true)}
                   onRate={rate}
+                  onOpenSources={() => setShowSources(true)}
                   disabled={streaming}
                 />
               ))}
@@ -290,8 +339,8 @@ export default function ChatPage() {
           )}
 
           {/* Chat Input Bar */}
-          <form className="border-t border-line bg-surface/95 backdrop-blur px-4 py-3.5 md:px-8" onSubmit={(event) => { event.preventDefault(); send() }}>
-            <div className="mx-auto flex max-w-4xl items-end gap-2.5">
+          <form className="border-t border-line bg-surface/95 backdrop-blur px-4 py-3.5 md:px-8 lg:px-12" onSubmit={(event) => { event.preventDefault(); send() }}>
+            <div className="mx-auto flex w-full max-w-5xl xl:max-w-6xl items-end gap-2.5">
               <div className="relative flex-1">
                 <textarea
                   className="max-h-40 min-h-12 w-full resize-none rounded-[14px] border border-line bg-canvas px-4 py-3 text-sm text-ink placeholder:text-muted outline-none transition-all focus:border-accent focus:bg-white focus:ring-2 focus:ring-accent/10"
@@ -328,21 +377,23 @@ export default function ChatPage() {
                 </Button>
               )}
             </div>
-            <p className="mx-auto mt-2 max-w-4xl text-[11px] text-muted flex items-center justify-between">
+            <p className="mx-auto mt-2 max-w-5xl xl:max-w-6xl text-[11px] text-muted flex items-center justify-between">
               <span>Answers are strictly grounded in uploaded brochures — zero hallucination.</span>
               <span className="hidden sm:inline">Shift + Enter for new line</span>
             </p>
           </form>
         </section>
 
-        {/* Fixed Right-Side Sources Panel */}
-        <SourcePanel sources={sources} />
+        {/* Collapsible Right-Side Sources Panel */}
+        {showSources && (
+          <SourcePanel sources={sources} onClose={() => setShowSources(false)} />
+        )}
       </div>
     </Shell>
   )
 }
 
-function Message({ message, onCopy, onRegenerate, onRate, disabled }) {
+function Message({ message, onCopy, onRegenerate, onRate, onOpenSources, disabled }) {
   if (message.role === 'USER') {
     return (
       <div className="flex justify-end">
@@ -371,10 +422,14 @@ function Message({ message, onCopy, onRegenerate, onRate, disabled }) {
         </div>
 
         {message.sources?.length > 0 && (
-          <span className="flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-semibold text-accent">
+          <button
+            onClick={onOpenSources}
+            className="flex items-center gap-1.5 rounded-full bg-accent/10 hover:bg-accent/20 px-2.5 py-1 text-[11px] font-semibold text-accent transition-colors"
+            title="Click to view verified brochure sources"
+          >
             <FileText className="h-3 w-3" />
             {message.sources.length} sources
-          </span>
+          </button>
         )}
       </div>
 
@@ -428,9 +483,9 @@ function Message({ message, onCopy, onRegenerate, onRate, disabled }) {
 
 function AnswerBlock({ title, text, tint }) {
   return (
-    <div className={`answer mb-3 rounded-[14px] p-4 ${tint ? 'bg-accent-tint/60 border border-accent/20' : 'bg-canvas/60 border border-line/60'}`}>
+    <div className={`answer mb-3.5 w-full rounded-[14px] p-4.5 ${tint ? 'bg-accent-tint/60 border border-accent/20' : 'bg-canvas/60 border border-line/60'}`}>
       {title ? (
-        <h3 className="mb-2.5 text-xs font-bold uppercase tracking-wider text-navy flex items-center gap-1.5">
+        <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-navy flex items-center gap-1.5">
           <span className={`h-1.5 w-1.5 rounded-full ${tint ? 'bg-accent' : 'bg-navy'}`} />
           {title}
         </h3>
@@ -439,7 +494,7 @@ function AnswerBlock({ title, text, tint }) {
         remarkPlugins={[remarkGfm]}
         components={{
           table: ({ children }) => (
-            <div className="table-scroll-wrapper">
+            <div className="table-scroll-wrapper w-full">
               <div className="table-scroll-hint">
                 <span>↔ Scroll right to compare all specifications</span>
               </div>
@@ -499,13 +554,24 @@ function Typing() {
   )
 }
 
-function SourcePanel({ sources }) {
+function SourcePanel({ sources, onClose }) {
   if (!sources?.length) {
     return (
-      <aside className="hidden h-full flex-col border-l border-line bg-surface p-5 xl:flex">
-        <h3 className="font-heading text-xs font-bold uppercase tracking-wider text-muted/80">
-          Source Citations
-        </h3>
+      <aside className="h-full w-[280px] shrink-0 flex-col border-l border-line bg-surface p-4 flex">
+        <div className="flex items-center justify-between pb-3 border-b border-line">
+          <h3 className="font-heading text-xs font-bold uppercase tracking-wider text-muted/80">
+            Source Citations
+          </h3>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="p-1 rounded-md text-muted hover:text-navy hover:bg-canvas transition-colors"
+              title="Close panel"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
         <div className="mt-8 flex flex-col items-center justify-center text-center text-muted">
           <FileText className="h-8 w-8 text-muted/40 mb-2 stroke-1" />
           <p className="text-xs font-medium">No citations active</p>
@@ -518,18 +584,29 @@ function SourcePanel({ sources }) {
   }
 
   return (
-    <aside className="hidden h-full flex-col overflow-y-auto border-l border-line bg-surface p-4 xl:flex" data-lenis-prevent>
+    <aside className="h-full w-[280px] shrink-0 flex-col overflow-y-auto border-l border-line bg-surface p-4 flex" data-lenis-prevent>
       <div className="flex items-center justify-between pb-3 border-b border-line">
         <h3 className="font-heading text-xs font-bold uppercase tracking-wider text-navy flex items-center gap-1.5">
           <FileText className="h-3.5 w-3.5 text-accent" />
           Verified Sources
         </h3>
-        <span className="rounded-full bg-accent-tint px-2 py-0.5 text-[11px] font-bold text-accent">
-          {sources.length} cited
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="rounded-full bg-accent-tint px-2 py-0.5 text-[10px] font-bold text-accent">
+            {sources.length} cited
+          </span>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="p-1 rounded-md text-muted hover:text-navy hover:bg-canvas transition-colors"
+              title="Close panel"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
       </div>
 
-      <ul className="mt-3.5 space-y-2.5">
+      <ul className="mt-3 space-y-2.5">
         {sources.map((source, index) => (
           <li key={`${source.documentId}-${source.pageNumber}-${index}`}>
             <button
