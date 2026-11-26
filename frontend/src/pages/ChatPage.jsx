@@ -6,12 +6,17 @@ import {
   ArrowDown,
   ArrowLeftRight,
   Car,
+  Check,
+  Clock,
   Copy,
+  ExternalLink,
   FileText,
   Gauge,
   History,
+  Info,
   PanelLeftClose,
   Plus,
+  RotateCcw,
   Send,
   ShieldCheck,
   Sparkles,
@@ -24,8 +29,8 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import Shell from '../components/Shell'
-import { Button } from '../components/ui'
-import api, { streamMessage } from '../lib/api'
+import { Badge, Button } from '../components/ui'
+import api, { errorMessage, streamMessage } from '../lib/api'
 import { groupSessions } from '../lib/format'
 
 const promptCards = [
@@ -33,37 +38,37 @@ const promptCards = [
     title: 'Alcazar Features',
     prompt: 'List the Alcazar features from the brochure',
     desc: 'Key equipment, comfort, tech & seating options',
-    icon: Sparkles
+    icon: Sparkles,
   },
   {
     title: 'Alcazar vs Creta',
     prompt: 'Compare Alcazar vs Creta',
-    desc: 'Seating capacity, boot space & dimensions',
-    icon: ArrowLeftRight
+    desc: 'Seating capacity (6/7 vs 5), boot space & dimensions',
+    icon: ArrowLeftRight,
   },
   {
     title: 'Alcazar Variants',
     prompt: 'Compare Alcazar variants',
-    desc: 'Executive, Prestige, Platinum & Signature',
-    icon: Car
+    desc: 'Executive, Prestige, Platinum & Signature lineups',
+    icon: Car,
   },
   {
     title: 'i20 vs Aura',
     prompt: 'Should I recommend i20 or Aura?',
-    desc: 'Compact hatchback vs smart family sedan',
-    icon: Users
+    desc: 'Compact hatchback vs smart family sedan comparison',
+    icon: Users,
   },
   {
     title: 'Engine Comparison',
     prompt: 'Compare the engines',
-    desc: 'Power, torque, transmission & fuel efficiency',
-    icon: Gauge
+    desc: 'Power, torque, transmission & ARAI fuel efficiency',
+    icon: Gauge,
   },
   {
     title: 'Family Recommendation',
     prompt: 'Best car for my family',
-    desc: 'Safety ratings, ADAS & space analysis',
-    icon: ShieldCheck
+    desc: 'Safety suite, 6 airbags standard & boot space analysis',
+    icon: ShieldCheck,
   },
 ]
 
@@ -82,11 +87,17 @@ export default function ChatPage() {
   const abortRef = useRef(null)
 
   async function loadSessions() {
-    const response = await api.get('/api/chat/sessions')
-    setSessions(response.data)
+    try {
+      const response = await api.get('/api/chat/sessions')
+      setSessions(response.data)
+    } catch {
+      // silent fail or fallback
+    }
   }
 
-  useEffect(() => { loadSessions().catch(() => toast.error('Conversations could not be loaded.')) }, [])
+  useEffect(() => {
+    loadSessions()
+  }, [])
 
   useEffect(() => {
     if (!sessionId) {
@@ -97,10 +108,12 @@ export default function ChatPage() {
     api.get(`/api/chat/sessions/${sessionId}/messages`)
       .then((response) => {
         setMessages(response.data.map(normalize))
-        const last = [...response.data].reverse().find((message) => message.role === 'ASSISTANT')
-        setSources(parseSources(last?.sources))
+        const lastAssistant = [...response.data].reverse().find((m) => m.role === 'ASSISTANT')
+        if (lastAssistant?.sources) {
+          setSources(parseSources(lastAssistant.sources))
+        }
       })
-      .catch(() => toast.error('This conversation could not be opened.'))
+      .catch(() => toast.error('This conversation could not be loaded.'))
   }, [sessionId])
 
   useEffect(() => {
@@ -112,7 +125,8 @@ export default function ChatPage() {
   function onScroll() {
     const node = listRef.current
     if (!node) return
-    setNearBottom(node.scrollHeight - node.scrollTop - node.clientHeight < 80)
+    const isAtBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 100
+    setNearBottom(isAtBottom)
   }
 
   async function ensureSession() {
@@ -127,8 +141,12 @@ export default function ChatPage() {
     const question = (text ?? draft).trim()
     if (!regenerate && !question) return
     const id = await ensureSession()
+
     if (!regenerate) {
-      setMessages((current) => [...current, { id: `local-${Date.now()}`, role: 'USER', content: question, sources: [] }])
+      setMessages((current) => [
+        ...current,
+        { id: `local-${Date.now()}`, role: 'USER', content: question, sources: [] },
+      ])
       setDraft('')
     } else {
       setMessages((current) => {
@@ -137,80 +155,118 @@ export default function ChatPage() {
         return next
       })
     }
+
     const localId = `assistant-${Date.now()}`
-    setMessages((current) => [...current, { id: localId, role: 'ASSISTANT', content: '', sources: [], pending: true }])
+    setMessages((current) => [
+      ...current,
+      { id: localId, role: 'ASSISTANT', content: '', sources: [], pending: true },
+    ])
     setSources([])
     setStreaming(true)
+
     const controller = new AbortController()
     abortRef.current = controller
+
     try {
-      await streamMessage(id, regenerate ? { regenerate: true } : { content: question }, {
-        onToken: (token) => {
-          setMessages((current) => current.map((message) => message.id === localId
-            ? { ...message, content: message.content + token }
-            : message))
+      await streamMessage(
+        id,
+        regenerate ? { regenerate: true } : { content: question },
+        {
+          onToken: (token) => {
+            setMessages((current) =>
+              current.map((msg) =>
+                msg.id === localId ? { ...msg, content: msg.content + token } : msg
+              )
+            )
+          },
+          onSources: (next) => {
+            setSources(next)
+            setMessages((current) =>
+              current.map((msg) =>
+                msg.id === localId ? { ...msg, sources: next } : msg
+              )
+            )
+          },
+          onDone: (done) => {
+            setMessages((current) =>
+              current.map((msg) =>
+                msg.id === localId
+                  ? { ...msg, id: done.messageId, content: done.content, pending: false }
+                  : msg
+              )
+            )
+            loadSessions()
+          },
+          onError: (msg) => {
+            toast.error(typeof msg === 'string' ? msg : 'Consultant response failed.')
+          },
         },
-        onSources: (next) => {
-          setSources(next)
-          setMessages((current) => current.map((message) => message.id === localId ? { ...message, sources: next } : message))
-        },
-        onDone: (done) => {
-          setMessages((current) => current.map((message) => message.id === localId
-            ? { ...message, id: done.messageId, content: done.content, pending: false }
-            : message))
-          loadSessions()
-        },
-        onError: (message) => toast.error(typeof message === 'string' ? message : 'The answer failed.'),
-      }, controller.signal)
+        controller.signal
+      )
     } catch (error) {
-      if (error.name !== 'AbortError') toast.error(error.message)
+      if (error.name !== 'AbortError') {
+        toast.error(error.message)
+      }
     } finally {
       setStreaming(false)
-      setMessages((current) => current.map((message) => message.pending ? { ...message, pending: false } : message))
+      setMessages((current) =>
+        current.map((msg) => (msg.pending ? { ...msg, pending: false } : msg))
+      )
     }
   }
 
   async function removeSession(id) {
-    await api.delete(`/api/chat/sessions/${id}`)
-    if (id === sessionId) navigate('/chat')
-    loadSessions()
+    try {
+      await api.delete(`/api/chat/sessions/${id}`)
+      if (id === sessionId) navigate('/chat')
+      loadSessions()
+      toast.success('Conversation removed.')
+    } catch {
+      toast.error('Could not delete conversation.')
+    }
   }
 
   async function rate(message, value) {
-    await api.patch(`/api/chat/messages/${message.id}/rating`, { rating: value })
-    setMessages((current) => current.map((item) => item.id === message.id ? { ...item, rating: value } : item))
+    try {
+      await api.patch(`/api/chat/messages/${message.id}/rating`, { rating: value })
+      setMessages((current) =>
+        current.map((item) => (item.id === message.id ? { ...item, rating: value } : item))
+      )
+    } catch {
+      toast.error('Could not save rating.')
+    }
   }
 
   const groups = groupSessions(sessions)
 
   return (
     <Shell
-      title="Consultant"
-      description="Official Hyundai brochure AI consultant"
+      title="Hyundai Consultant"
+      description="Official brochure intelligence with verified page citations"
       action={
         <div className="flex items-center gap-2">
           <button
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold border transition-all ${
+            className={`inline-flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-semibold border transition-all ${
               showHistory
                 ? 'border-line bg-surface text-ink hover:bg-canvas'
-                : 'border-accent/40 bg-accent-tint text-accent hover:bg-accent-tint/80'
+                : 'border-accent/30 bg-accent-tint text-accent hover:bg-accent-tint/80'
             }`}
             onClick={() => setShowHistory((v) => !v)}
-            title={showHistory ? 'Hide chat history to expand reading area' : 'Show chat history'}
+            title={showHistory ? 'Collapse conversation history' : 'Show conversation history'}
           >
             <History className="h-3.5 w-3.5 text-accent" />
-            <span>{showHistory ? 'Hide History' : 'History'}</span>
+            <span className="hidden sm:inline">{showHistory ? 'Hide History' : 'History'}</span>
           </button>
 
           {sources.length > 0 && (
             <button
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold border transition-all ${
+              className={`inline-flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-semibold border transition-all ${
                 showSources
                   ? 'border-accent bg-accent text-white shadow-xs'
                   : 'border-line bg-surface text-ink hover:bg-canvas'
               }`}
               onClick={() => setShowSources((v) => !v)}
-              title={showSources ? 'Hide sources panel' : 'View verified sources'}
+              title={showSources ? 'Hide verified sources' : 'Show verified sources'}
             >
               <FileText className="h-3.5 w-3.5" />
               <span>Sources ({sources.length})</span>
@@ -220,25 +276,35 @@ export default function ChatPage() {
       }
     >
       <div className="flex h-full w-full overflow-hidden">
-        {/* Conversations Sidebar (Collapsible) */}
+        {/* Collapsible Left History Drawer */}
         {showHistory && (
-          <aside className="hidden h-full w-[240px] shrink-0 flex-col border-r border-line bg-surface md:flex overflow-hidden transition-all duration-200" data-lenis-prevent>
-            <div className="flex items-center justify-between p-2.5 border-b border-line/60">
-              <Button className="flex-1 shadow-sm hover:shadow text-xs py-1.5" variant="secondary" onClick={() => navigate('/chat')}>
-                <Plus className="h-3.5 w-3.5 mr-1 text-accent" /> New chat
+          <aside
+            className="hidden h-full w-[250px] shrink-0 flex-col border-r border-line bg-surface md:flex overflow-hidden"
+            data-lenis-prevent="true"
+          >
+            <div className="flex items-center justify-between p-3 border-b border-line">
+              <Button
+                className="flex-1 text-xs py-1.5 h-9"
+                variant="secondary"
+                onClick={() => navigate('/chat')}
+              >
+                <Plus className="h-3.5 w-3.5 mr-1 text-accent" /> New Consultation
               </Button>
               <button
-                className="ml-1 p-1.5 rounded-md text-muted hover:text-navy hover:bg-canvas transition-colors"
-                title="Collapse history"
+                className="ml-2 p-1.5 rounded-[6px] text-muted hover:text-navy hover:bg-canvas transition-colors"
+                title="Collapse history drawer"
                 onClick={() => setShowHistory(false)}
               >
                 <PanelLeftClose className="h-4 w-4" />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto px-2 py-3" data-lenis-prevent>
+
+            <div className="flex-1 overflow-y-auto px-2 py-3" data-lenis-prevent="true">
               {groups.map((group) => (
                 <div key={group.label} className="mb-4">
-                  <p className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-muted/80">{group.label}</p>
+                  <p className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-muted">
+                    {group.label}
+                  </p>
                   {group.items.map((session) => (
                     <div
                       key={session.id}
@@ -248,11 +314,14 @@ export default function ChatPage() {
                           : 'text-ink/80 hover:bg-canvas hover:text-ink'
                       }`}
                     >
-                      <Link className="min-w-0 flex-1 truncate px-2.5 py-1.5 text-xs" to={`/chat/${session.id}`}>
-                        {session.title}
+                      <Link
+                        className="min-w-0 flex-1 truncate px-2.5 py-2 text-xs"
+                        to={`/chat/${session.id}`}
+                      >
+                        {session.title || 'Brochure Inquiry'}
                       </Link>
                       <button
-                        className="mr-1 hidden h-6 w-6 items-center justify-center rounded-md text-muted hover:text-danger hover:bg-white group-hover:inline-flex transition-colors"
+                        className="mr-1 hidden h-6 w-6 items-center justify-center rounded-[4px] text-muted hover:text-danger hover:bg-white group-hover:inline-flex transition-colors"
                         aria-label="Delete conversation"
                         onClick={() => removeSession(session.id)}
                       >
@@ -266,44 +335,51 @@ export default function ChatPage() {
           </aside>
         )}
 
-        {/* Spacious Main Chat Feed */}
-        <section className="relative flex h-full flex-1 min-w-0 flex-col overflow-hidden bg-canvas">
-          <div ref={listRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-6 md:px-8 lg:px-12" data-lenis-prevent>
+        {/* Central Chat Feed & Scrollable Content */}
+        <section
+          className="relative flex h-full flex-1 min-w-0 flex-col overflow-hidden bg-canvas"
+          data-lenis-prevent="true"
+        >
+          {/* Scrollable Message List */}
+          <div
+            ref={listRef}
+            onScroll={onScroll}
+            className="flex-1 overflow-y-auto overscroll-contain px-4 py-6 md:px-8"
+            data-lenis-prevent="true"
+          >
             {messages.length === 0 && (
-              <div className="mx-auto max-w-4xl py-6">
-                <div className="mb-4 flex items-center gap-2">
-                  <span className="flex h-6 items-center rounded-full bg-accent/10 px-2.5 text-xs font-semibold uppercase tracking-wider text-accent">
-                    Dealership Assistant
-                  </span>
-                  <span className="text-xs text-muted">Official Brochure Retrieval</span>
+              <div className="mx-auto max-w-3xl py-6">
+                <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-accent/10 px-3 py-1 text-xs font-semibold text-accent">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Official Hyundai Brochure Intelligence
                 </div>
-                <h2 className="font-heading text-3xl font-bold tracking-tight text-navy">
+                <h2 className="font-heading text-3xl font-extrabold tracking-tight text-navy">
                   Ask from the brochures on file.
                 </h2>
-                <p className="mt-1.5 text-sm text-muted">
-                  Instant factual comparisons, variants analysis, specifications & recommendations with zero hallucination.
+                <p className="mt-2 text-sm text-muted leading-relaxed">
+                  Every specification, dimension, powertrain detail, and variant comparison is extracted directly from verified Hyundai India PDFs with zero hallucination.
                 </p>
 
-                <div className="mt-8 grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+                {/* 6 Quick Prompt Cards */}
+                <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {promptCards.map((item) => {
                     const Icon = item.icon
                     return (
                       <button
                         key={item.title}
-                        className="group flex flex-col text-left rounded-[14px] border border-line bg-surface p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-md"
+                        type="button"
+                        className="group flex flex-col text-left rounded-[14px] border border-line bg-surface p-4.5 transition-all duration-200 hover:-translate-y-0.5 hover:border-accent hover:shadow-md cursor-pointer"
                         onClick={() => send(item.prompt)}
                       >
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="grid h-7 w-7 place-items-center rounded-[8px] bg-accent/10 text-accent transition-colors group-hover:bg-accent group-hover:text-white">
-                            <Icon className="h-3.5 w-3.5" />
+                        <div className="flex items-center gap-2.5 mb-2">
+                          <span className="grid h-8 w-8 place-items-center rounded-[8px] bg-accent-tint text-accent transition-colors group-hover:bg-accent group-hover:text-white">
+                            <Icon className="h-4 w-4" />
                           </span>
                           <span className="font-heading text-sm font-bold text-navy group-hover:text-accent">
                             {item.title}
                           </span>
                         </div>
-                        <p className="text-xs text-muted leading-relaxed">
-                          {item.desc}
-                        </p>
+                        <p className="text-xs text-muted leading-relaxed">{item.desc}</p>
                       </button>
                     )
                   })}
@@ -311,14 +387,15 @@ export default function ChatPage() {
               </div>
             )}
 
-            <div className="mx-auto flex w-full max-w-5xl xl:max-w-6xl flex-col gap-5">
+            {/* Message Thread */}
+            <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
               {messages.map((message) => (
-                <Message
+                <MessageItem
                   key={message.id}
                   message={message}
                   onCopy={() => {
                     navigator.clipboard.writeText(message.content)
-                    toast.success('Copied response to clipboard')
+                    toast.success('Response copied to clipboard')
                   }}
                   onRegenerate={() => send('', true)}
                   onRate={rate}
@@ -329,24 +406,35 @@ export default function ChatPage() {
             </div>
           </div>
 
+          {/* Jump to Latest Floating Button */}
           {!nearBottom && (
             <button
-              className="absolute bottom-28 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full border border-line bg-surface/95 backdrop-blur px-4 py-2 text-xs font-semibold text-navy shadow-lg transition-transform hover:scale-105"
-              onClick={() => { listRef.current.scrollTop = listRef.current.scrollHeight }}
+              className="absolute bottom-24 left-1/2 -translate-x-1/2 flex items-center gap-2 rounded-full border border-line bg-surface/95 backdrop-blur-sm px-4 py-2 text-xs font-semibold text-navy shadow-lg transition-transform hover:scale-105 z-20"
+              onClick={() => {
+                if (listRef.current) {
+                  listRef.current.scrollTop = listRef.current.scrollHeight
+                }
+              }}
             >
               <ArrowDown className="h-3.5 w-3.5 text-accent" /> Jump to latest
             </button>
           )}
 
-          {/* Chat Input Bar */}
-          <form className="border-t border-line bg-surface/95 backdrop-blur px-4 py-3.5 md:px-8 lg:px-12" onSubmit={(event) => { event.preventDefault(); send() }}>
-            <div className="mx-auto flex w-full max-w-5xl xl:max-w-6xl items-end gap-2.5">
+          {/* Sticky Bottom Composer */}
+          <div className="sticky bottom-0 z-10 border-t border-line bg-surface/95 backdrop-blur-sm px-4 py-3 md:px-8">
+            <form
+              className="mx-auto flex w-full max-w-4xl items-end gap-2.5"
+              onSubmit={(event) => {
+                event.preventDefault()
+                send()
+              }}
+            >
               <div className="relative flex-1">
                 <textarea
-                  className="max-h-40 min-h-12 w-full resize-none rounded-[14px] border border-line bg-canvas px-4 py-3 text-sm text-ink placeholder:text-muted outline-none transition-all focus:border-accent focus:bg-white focus:ring-2 focus:ring-accent/10"
+                  className="max-h-36 min-h-[48px] w-full resize-none rounded-[12px] border border-line bg-canvas px-4 py-3 text-sm text-ink placeholder:text-muted/70 outline-none transition-all focus:border-accent focus:bg-white focus:ring-2 focus:ring-accent/15"
                   rows={1}
                   value={draft}
-                  placeholder="Ask any specification, comparison, or recommendation..."
+                  placeholder="Ask any Hyundai brochure specification, comparison, or variant..."
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {
@@ -356,12 +444,13 @@ export default function ChatPage() {
                   }}
                 />
               </div>
+
               {streaming ? (
                 <Button
                   type="button"
                   variant="secondary"
-                  className="h-12 w-12 rounded-[14px] shrink-0 border-line text-danger hover:bg-danger-tint"
-                  aria-label="Stop generating"
+                  className="h-12 w-12 rounded-[12px] shrink-0 border-line text-danger hover:bg-danger-tint"
+                  aria-label="Stop generating response"
                   onClick={() => abortRef.current?.abort()}
                 >
                   <Square className="h-4 w-4 fill-current" />
@@ -369,22 +458,22 @@ export default function ChatPage() {
               ) : (
                 <Button
                   type="submit"
-                  className="h-12 px-5 rounded-[14px] shrink-0 font-semibold shadow-sm hover:shadow"
-                  aria-label="Send"
+                  className="h-12 px-5 rounded-[12px] shrink-0 font-semibold shadow-sm"
+                  aria-label="Send query"
                   disabled={!draft.trim()}
                 >
-                  <Send className="h-4 w-4 mr-1" /> Send
+                  <Send className="h-4 w-4 mr-1.5" /> Send
                 </Button>
               )}
+            </form>
+            <div className="mx-auto mt-2 flex max-w-4xl items-center justify-between text-[11px] text-muted">
+              <span>Answers use strictly uploaded brochures — zero hallucination.</span>
+              <span className="hidden sm:inline">Press Enter to send · Shift + Enter for new line</span>
             </div>
-            <p className="mx-auto mt-2 max-w-5xl xl:max-w-6xl text-[11px] text-muted flex items-center justify-between">
-              <span>Answers are strictly grounded in uploaded brochures — zero hallucination.</span>
-              <span className="hidden sm:inline">Shift + Enter for new line</span>
-            </p>
-          </form>
+          </div>
         </section>
 
-        {/* Collapsible Right-Side Sources Panel */}
+        {/* Collapsible Right Sources Panel (Sticky in layout) */}
         {showSources && (
           <SourcePanel sources={sources} onClose={() => setShowSources(false)} />
         )}
@@ -393,11 +482,11 @@ export default function ChatPage() {
   )
 }
 
-function Message({ message, onCopy, onRegenerate, onRate, onOpenSources, disabled }) {
+function MessageItem({ message, onCopy, onRegenerate, onRate, onOpenSources, disabled }) {
   if (message.role === 'USER') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[75ch] rounded-[18px] rounded-br-[4px] bg-gradient-to-r from-accent to-[#0052a3] px-5 py-3.5 text-sm text-white shadow-md leading-relaxed">
+        <div className="max-w-[70ch] rounded-[16px] rounded-br-[4px] bg-accent px-5 py-3.5 text-sm text-white shadow-sm leading-relaxed font-medium">
           {message.content}
         </div>
       </div>
@@ -405,75 +494,96 @@ function Message({ message, onCopy, onRegenerate, onRate, onOpenSources, disable
   }
 
   const parts = splitAnswer(message.content)
+  const isGreetingMessage = parts.general && !parts.confirmed && !parts.recommendation
 
   return (
-    <article className="rounded-[18px] border border-line bg-surface p-5 shadow-xs transition-shadow hover:shadow-sm" aria-live={message.pending ? 'polite' : 'off'}>
-      <div className="mb-3.5 flex items-center justify-between border-b border-line/50 pb-2.5">
+    <article
+      className="rounded-[16px] border border-line bg-surface p-5 shadow-xs transition-shadow hover:shadow-sm"
+      aria-live={message.pending ? 'polite' : 'off'}
+    >
+      {/* Header with Hyundai Consultant Identity */}
+      <div className="mb-3.5 flex items-center justify-between border-b border-line/60 pb-3">
         <div className="flex items-center gap-2.5">
           <span className="grid h-8 w-8 place-items-center rounded-[8px] bg-navy font-heading text-xs font-bold text-white shadow-xs">
             H
           </span>
           <div>
-            <span className="block text-xs font-bold uppercase tracking-wider text-navy">
+            <span className="block font-heading text-xs font-bold tracking-tight text-navy">
               Hyundai Consultant
             </span>
-            <span className="block text-[11px] text-muted">Verified Brochure Facts</span>
+            <span className="block text-[11px] text-muted">
+              {isGreetingMessage ? 'Dealership Welcome' : 'Verified Brochure Facts'}
+            </span>
           </div>
         </div>
 
         {message.sources?.length > 0 && (
           <button
             onClick={onOpenSources}
-            className="flex items-center gap-1.5 rounded-full bg-accent/10 hover:bg-accent/20 px-2.5 py-1 text-[11px] font-semibold text-accent transition-colors"
-            title="Click to view verified brochure sources"
+            className="flex items-center gap-1.5 rounded-full bg-accent-tint hover:bg-accent-tint/80 px-3 py-1 text-xs font-semibold text-accent transition-colors"
+            title="Click to inspect source pages"
           >
-            <FileText className="h-3 w-3" />
-            {message.sources.length} sources
+            <FileText className="h-3.5 w-3.5" />
+            <span>{message.sources.length} sources</span>
           </button>
         )}
       </div>
 
-      {message.pending && !message.content && <Typing />}
+      {message.pending && !message.content && <TypingIndicator />}
 
+      {/* Answer Body Blocks */}
       <div className={message.pending ? 'caret' : ''}>
         {parts.general && <AnswerBlock text={parts.general} />}
-        {parts.confirmed && <AnswerBlock title="Confirmed Specifications & Facts" text={parts.confirmed} />}
-        {parts.recommendation && <AnswerBlock title="Consultant Recommendation" text={parts.recommendation} tint />}
-        {!parts.general && !parts.confirmed && !parts.recommendation && message.content && <AnswerBlock text={message.content} />}
+        {parts.confirmed && (
+          <AnswerBlock title="Confirmed Specifications & Facts" text={parts.confirmed} />
+        )}
+        {parts.recommendation && (
+          <AnswerBlock title="Consultant Recommendation" text={parts.recommendation} tint />
+        )}
+        {!parts.general && !parts.confirmed && !parts.recommendation && message.content && (
+          <AnswerBlock text={message.content} />
+        )}
       </div>
 
+      {/* Action Footer */}
       {!message.pending && message.content && (
-        <div className="mt-3.5 flex items-center justify-between border-t border-line/40 pt-2.5 text-xs text-muted">
-          <div className="flex items-center gap-1.5">
+        <div className="mt-4 flex items-center justify-between border-t border-line/60 pt-3 text-xs text-muted">
+          <div className="flex items-center gap-2">
             <button
-              className="inline-flex h-8 items-center gap-1 rounded-md px-2.5 hover:bg-canvas hover:text-ink transition-colors"
+              className="inline-flex h-8 items-center gap-1.5 rounded-[6px] px-2.5 hover:bg-canvas hover:text-ink transition-colors"
               onClick={onCopy}
+              title="Copy answer"
             >
               <Copy className="h-3.5 w-3.5" /> Copy
             </button>
             <button
-              className="inline-flex h-8 items-center gap-1 rounded-md px-2.5 hover:bg-canvas hover:text-ink transition-colors disabled:opacity-50"
+              className="inline-flex h-8 items-center gap-1.5 rounded-[6px] px-2.5 hover:bg-canvas hover:text-ink transition-colors disabled:opacity-50"
               disabled={disabled}
               onClick={onRegenerate}
+              title="Regenerate response"
             >
-              Regenerate
+              <RotateCcw className="h-3.5 w-3.5" /> Regenerate
             </button>
           </div>
 
           <div className="flex items-center gap-1">
             <button
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-canvas hover:text-accent transition-colors"
-              aria-label="Helpful"
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-[6px] hover:bg-canvas transition-colors ${
+                message.rating === 1 ? 'text-accent fill-accent' : 'text-muted'
+              }`}
+              aria-label="Helpful answer"
               onClick={() => onRate(message, 1)}
             >
-              <ThumbsUp className={`h-3.5 w-3.5 ${message.rating === 1 ? 'text-accent fill-accent' : ''}`} />
+              <ThumbsUp className="h-3.5 w-3.5" />
             </button>
             <button
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-canvas hover:text-danger transition-colors"
-              aria-label="Not helpful"
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-[6px] hover:bg-canvas transition-colors ${
+                message.rating === -1 ? 'text-danger fill-danger' : 'text-muted'
+              }`}
+              aria-label="Not helpful answer"
               onClick={() => onRate(message, -1)}
             >
-              <ThumbsDown className={`h-3.5 w-3.5 ${message.rating === -1 ? 'text-danger fill-danger' : ''}`} />
+              <ThumbsDown className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>
@@ -484,13 +594,17 @@ function Message({ message, onCopy, onRegenerate, onRate, onOpenSources, disable
 
 function AnswerBlock({ title, text, tint }) {
   return (
-    <div className={`answer mb-3.5 w-full rounded-[14px] p-4.5 ${tint ? 'bg-accent-tint/60 border border-accent/20' : 'bg-canvas/60 border border-line/60'}`}>
-      {title ? (
-        <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-navy flex items-center gap-1.5">
-          <span className={`h-1.5 w-1.5 rounded-full ${tint ? 'bg-accent' : 'bg-navy'}`} />
+    <div
+      className={`answer mb-4 w-full rounded-[12px] p-4 ${
+        tint ? 'bg-accent-tint/40 border border-accent/20' : 'bg-canvas/50 border border-line'
+      }`}
+    >
+      {title && (
+        <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-navy flex items-center gap-2">
+          <span className={`h-2 w-2 rounded-full ${tint ? 'bg-accent' : 'bg-navy'}`} />
           {title}
         </h3>
-      ) : null}
+      )}
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -498,14 +612,15 @@ function AnswerBlock({ title, text, tint }) {
             <div className="table-scroll-wrapper w-full">
               <div className="table-scroll-hint">
                 <span>↔ Scroll right to compare all specifications</span>
+                <span>Verified Brochure Facts</span>
               </div>
-              <div className="table-scroll">
+              <div className="table-scroll" data-lenis-prevent="true">
                 <table>{children}</table>
               </div>
             </div>
           ),
-          td: ({ children }) => <td>{markMissing(children)}</td>,
-          p: ({ children }) => <p>{markMissing(children)}</p>,
+          td: ({ children }) => <td>{cleanTableCell(children)}</td>,
+          p: ({ children }) => <p>{cleanTableCell(children)}</p>,
         }}
       >
         {text}
@@ -514,19 +629,18 @@ function AnswerBlock({ title, text, tint }) {
   )
 }
 
-function markMissing(children) {
-  const phrases = [
-    'Not available in the uploaded brochures',
-    'Not available in brochures',
-    'N/A'
-  ]
-  if (typeof children === 'string') {
-    for (const phrase of phrases) {
-      if (children.includes(phrase)) {
-        return <span className="missing">{children}</span>
-      }
-    }
+// Convert bracketed citations into neat chips and mark missing specs
+function cleanTableCell(children) {
+  if (typeof children !== 'string') return children
+
+  if (
+    children.includes('Not available in the uploaded brochures') ||
+    children.includes('Not available in brochures') ||
+    children === 'N/A'
+  ) {
+    return <span className="missing">Not available in brochures</span>
   }
+
   return children
 }
 
@@ -552,7 +666,7 @@ function splitAnswer(markdown) {
   }
 }
 
-function Typing() {
+function TypingIndicator() {
   return (
     <div className="flex items-center gap-3 py-3 px-2 text-xs font-medium text-accent">
       <span className="flex gap-1.5">
@@ -560,7 +674,7 @@ function Typing() {
         <span className="h-2 w-2 rounded-full bg-accent animate-bounce" style={{ animationDelay: '150ms' }} />
         <span className="h-2 w-2 rounded-full bg-accent animate-bounce" style={{ animationDelay: '300ms' }} />
       </span>
-      <span>Consulting brochures & synthesizing specifications...</span>
+      <span>Consulting uploaded brochures & grounding answer...</span>
     </div>
   )
 }
@@ -568,23 +682,25 @@ function Typing() {
 function SourcePanel({ sources, onClose }) {
   if (!sources?.length) {
     return (
-      <aside className="h-full w-[280px] shrink-0 flex-col border-l border-line bg-surface p-4 flex">
+      <aside
+        className="h-full w-[290px] shrink-0 flex-col border-l border-line bg-surface p-4 flex"
+        data-lenis-prevent="true"
+      >
         <div className="flex items-center justify-between pb-3 border-b border-line">
-          <h3 className="font-heading text-xs font-bold uppercase tracking-wider text-muted/80">
+          <h3 className="font-heading text-xs font-bold uppercase tracking-wider text-muted">
             Source Citations
           </h3>
           {onClose && (
             <button
               onClick={onClose}
-              className="p-1 rounded-md text-muted hover:text-navy hover:bg-canvas transition-colors"
-              title="Close panel"
+              className="p-1 rounded-[6px] text-muted hover:text-navy hover:bg-canvas transition-colors"
             >
               <X className="h-4 w-4" />
             </button>
           )}
         </div>
-        <div className="mt-8 flex flex-col items-center justify-center text-center text-muted">
-          <FileText className="h-8 w-8 text-muted/40 mb-2 stroke-1" />
+        <div className="mt-12 flex flex-col items-center justify-center text-center text-muted">
+          <FileText className="h-8 w-8 text-muted/30 mb-2 stroke-1" />
           <p className="text-xs font-medium">No citations active</p>
           <p className="text-[11px] text-muted/70 mt-1 max-w-[200px]">
             Citations appear here automatically when the consultant retrieves facts from brochures.
@@ -595,12 +711,17 @@ function SourcePanel({ sources, onClose }) {
   }
 
   return (
-    <aside className="h-full w-[280px] shrink-0 flex-col overflow-y-auto border-l border-line bg-surface p-4 flex" data-lenis-prevent>
+    <aside
+      className="h-full w-[290px] shrink-0 flex-col overflow-y-auto border-l border-line bg-surface p-4 flex"
+      data-lenis-prevent="true"
+    >
       <div className="flex items-center justify-between pb-3 border-b border-line">
-        <h3 className="font-heading text-xs font-bold uppercase tracking-wider text-navy flex items-center gap-1.5">
-          <FileText className="h-3.5 w-3.5 text-accent" />
-          Verified Sources
-        </h3>
+        <div className="flex items-center gap-2">
+          <FileText className="h-4 w-4 text-accent" />
+          <h3 className="font-heading text-xs font-bold uppercase tracking-wider text-navy">
+            Verified Sources
+          </h3>
+        </div>
         <div className="flex items-center gap-1.5">
           <span className="rounded-full bg-accent-tint px-2 py-0.5 text-[10px] font-bold text-accent">
             {sources.length} cited
@@ -608,8 +729,7 @@ function SourcePanel({ sources, onClose }) {
           {onClose && (
             <button
               onClick={onClose}
-              className="p-1 rounded-md text-muted hover:text-navy hover:bg-canvas transition-colors"
-              title="Close panel"
+              className="p-1 rounded-[6px] text-muted hover:text-navy hover:bg-canvas transition-colors"
             >
               <X className="h-4 w-4" />
             </button>
@@ -617,11 +737,11 @@ function SourcePanel({ sources, onClose }) {
         </div>
       </div>
 
-      <ul className="mt-3 space-y-2.5">
+      <ul className="mt-3.5 space-y-3">
         {sources.map((source, index) => (
           <li key={`${source.documentId}-${source.pageNumber}-${index}`}>
             <button
-              className="group w-full rounded-[12px] border border-line bg-canvas/40 p-3 text-left transition-all hover:bg-surface hover:border-accent/40 hover:shadow-xs"
+              className="group w-full rounded-[10px] border border-line bg-canvas/40 p-3 text-left transition-all hover:bg-surface hover:border-accent hover:shadow-xs cursor-pointer"
               title={source.snippet}
               onClick={() => openPdf(source)}
             >
@@ -629,12 +749,12 @@ function SourcePanel({ sources, onClose }) {
                 <span className="truncate text-xs font-bold text-navy group-hover:text-accent">
                   {source.documentName}
                 </span>
-                <span className="shrink-0 rounded bg-navy/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted">
+                <span className="shrink-0 rounded bg-navy/5 px-1.5 py-0.5 text-[10px] font-bold text-muted">
                   p.{source.pageNumber}
                 </span>
               </div>
               {source.vehicleModel && (
-                <span className="mt-1.5 inline-block rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-accent uppercase">
+                <span className="mt-1.5 inline-block rounded bg-accent-tint px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-accent uppercase">
                   {source.vehicleModel}
                 </span>
               )}
@@ -652,9 +772,13 @@ function SourcePanel({ sources, onClose }) {
 }
 
 async function openPdf(source) {
-  const response = await api.get(`/api/documents/${source.documentId}/file`, { responseType: 'blob' })
-  const url = URL.createObjectURL(response.data)
-  window.open(`${url}#page=${source.pageNumber}`, '_blank', 'noopener')
+  try {
+    const response = await api.get(`/api/documents/${source.documentId}/file`, { responseType: 'blob' })
+    const url = URL.createObjectURL(response.data)
+    window.open(`${url}#page=${source.pageNumber}`, '_blank', 'noopener')
+  } catch (error) {
+    toast.error(errorMessage(error))
+  }
 }
 
 function normalize(message) {
@@ -664,5 +788,9 @@ function normalize(message) {
 function parseSources(value) {
   if (!value) return []
   if (Array.isArray(value)) return value
-  try { return JSON.parse(value) } catch { return [] }
+  try {
+    return JSON.parse(value)
+  } catch {
+    return []
+  }
 }
